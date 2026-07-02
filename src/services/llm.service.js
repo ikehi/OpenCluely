@@ -45,7 +45,7 @@ class LLMService {
     const defaults = config.get('llm.groq.generation') || {};
     const fallback = {
       temperature: 0.4,
-      max_tokens: 350,
+      max_tokens: 2048,
       top_p: 0.95
     };
 
@@ -137,21 +137,98 @@ class LLMService {
     }
   }
 
+  async processMultipleImagesWithSkill(images, activeSkill, sessionMemory = [], programmingLanguage = null) {
+    if (!this.isInitialized) {
+      throw new Error('LLM service not initialized. Check Groq API key configuration.');
+    }
+
+    if (!images || !Array.isArray(images) || images.length === 0) {
+      throw new Error('Invalid images array provided to processMultipleImagesWithSkill');
+    }
+
+    const startTime = Date.now();
+    this.requestCount++;
+
+    try {
+      const { promptLoader } = require('../../prompt-loader');
+      const skillPrompt = promptLoader.getSkillPrompt(activeSkill, programmingLanguage) || '';
+
+      const messages = [];
+
+      if (skillPrompt && skillPrompt.trim().length > 0) {
+        messages.push({ role: 'system', content: skillPrompt });
+      }
+
+      const contentArray = [];
+      const imageCount = images.length;
+      
+      const langNote = programmingLanguage ? ` Use only ${programmingLanguage.toUpperCase()} for any code.` : '';
+      
+      const instruction = `You are given ${imageCount} screenshots that together form a single question. Analyze them all together. CRITICAL: You must provide ONLY the direct final answer. If it's a coding question, output ONLY the code. If it's multiple choice, output ONLY the correct option. Do NOT restate the problem, do NOT provide a breakdown, do NOT provide explanations, and do NOT use templates like "Step 1:". Just the raw answer.${langNote}`;
+      
+      contentArray.push({ type: 'text', text: instruction });
+
+      // Add each image to the content array
+      images.forEach((img) => {
+        const base64Image = img.imageBuffer.toString('base64');
+        const imageUrl = `data:${img.mimeType || 'image/png'};base64,${base64Image}`;
+        contentArray.push({ type: 'image_url', image_url: { url: imageUrl } });
+      });
+
+      messages.push({
+        role: 'user',
+        content: contentArray
+      });
+
+      const responseText = await this.executeRequest(messages, true);
+
+      const finalResponse = programmingLanguage
+        ? this.enforceProgrammingLanguage(responseText, programmingLanguage)
+        : responseText;
+
+      logger.logPerformance('LLM multi-image processing', startTime, {
+        activeSkill,
+        imageCount,
+        responseLength: finalResponse.length,
+        programmingLanguage: programmingLanguage || 'not specified',
+        requestId: this.requestCount
+      });
+
+      return {
+        response: finalResponse,
+        metadata: {
+          skill: activeSkill,
+          programmingLanguage,
+          processingTime: Date.now() - startTime,
+          requestId: this.requestCount,
+          usedFallback: false,
+          isImageAnalysis: true,
+          imageCount
+        }
+      };
+    } catch (error) {
+      this.errorCount++;
+      logger.error('LLM multi-image processing failed', {
+        error: error.message,
+        activeSkill,
+        requestId: this.requestCount
+      });
+
+      return {
+        response: `[Vision Model Error (Batch)]: ${error.message}`,
+        metadata: {
+          skill: activeSkill,
+          usedFallback: true,
+          isImageAnalysis: true
+        }
+      };
+    }
+  }
+
   formatImageInstruction(activeSkill, programmingLanguage) {
-    const sessionManager = require('../managers/session.manager');
-    const mode = sessionManager.getResponseMode();
     const langNote = programmingLanguage ? ` Use only ${programmingLanguage.toUpperCase()} for any code.` : '';
     
-    let modeNote = '';
-    if (mode === 'simple') {
-      modeNote = ' Provide ONLY the direct final answer. Do NOT include any explanations, breakdown, steps, or markdown formatting like "Problem Analysis" or "Time Complexity". Just the raw answer.';
-    } else if (mode === 'medium') {
-      modeNote = ' Provide the answer with a brief 1-2 sentence explanation. Keep it extremely concise.';
-    } else {
-      modeNote = ' Extract the problem concisely and provide the best possible solution with explanation and final code.';
-    }
-    
-    return `Analyze this image for a ${activeSkill.toUpperCase()} question.${modeNote}${langNote}`;
+    return `Analyze this image. CRITICAL: You must provide ONLY the direct final answer. If it's a coding question, output ONLY the code. If it's multiple choice, output ONLY the correct option. Do NOT restate the problem, do NOT provide a breakdown, do NOT provide explanations, and do NOT use templates like "Step 1:". Just the raw answer.${langNote}`;
   }
 
   async processTextWithSkill(text, activeSkill, sessionMemory = [], programmingLanguage = null) {
@@ -434,14 +511,14 @@ ABSOLUTE RULES:`;
   async executeRequest(messages, isVision = false) {
     const sessionManager = require('../managers/session.manager');
     const mode = sessionManager.getResponseMode();
-    let maxTokens = 450;
-    if (mode === 'simple') maxTokens = 150;
-    if (mode === 'medium') maxTokens = 250;
+    let maxTokens = 2500;
+    if (mode === 'simple') maxTokens = 450;
+    if (mode === 'medium') maxTokens = 850;
     
     // Fast model rotation pool — each model has independent rate limits on Groq free tier
     const modelPool = isVision
-      ? ['llama-4-scout-17b-16e-instruct', 'meta-llama/llama-4-scout-17b-16e-instruct']
-      : ['llama-3.1-8b-instant', 'llama3-8b-8192', 'gemma2-9b-it', 'llama-3.3-70b-versatile'];
+      ? ['meta-llama/llama-4-scout-17b-16e-instruct']
+      : ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'llama3-8b-8192', 'gemma2-9b-it'];
 
     const payload = {
       messages,

@@ -33,10 +33,11 @@ const sessionManager = require("./src/managers/session.manager");
 class ApplicationController {
   constructor() {
     this.isReady = false;
-    this.activeSkill = "dsa";
+    this.activeSkill = "general";
   // Default to Auto-Detect so language is inferred naturally
   this.codingLanguage = "auto";
     this.speechAvailable = false;
+    this.screenshotQueue = [];
 
     // Window configurations for reference
     this.windowConfigs = {
@@ -195,6 +196,9 @@ class ApplicationController {
       "CommandOrControl+Shift+X": () => this.cycleResponseMode(),
       // Show all shortcuts help overlay
       "CommandOrControl+Shift+Z": () => this.toggleShortcutHelp(),
+      // Multi-screenshot batch shortcuts
+      "CommandOrControl+Shift+A": () => this.addScreenshotToBatch(),
+      "CommandOrControl+Shift+D": () => this.sendBatchScreenshots(),
     };
 
     Object.entries(shortcuts).forEach(([accelerator, handler]) => {
@@ -669,6 +673,15 @@ class ApplicationController {
       this.triggerScreenshotOCR();
     });
 
+    // Handle batch screenshot operations
+    ipcMain.on("add-screenshot-to-batch", () => {
+      this.addScreenshotToBatch();
+    });
+    
+    ipcMain.on("send-batch-screenshots", () => {
+      this.sendBatchScreenshots();
+    });
+
     // Handle quit app (alternative method)
     ipcMain.on("quit-app", () => {
       logger.info("Quit app requested via IPC (on method)");
@@ -922,6 +935,148 @@ class ApplicationController {
       sessionManager.addConversationEvent({
         role: 'system',
         content: `Screenshot OCR failed: ${error.message}`,
+        action: 'ocr_error',
+        metadata: {
+          error: error.message
+        }
+      });
+    }
+  }
+
+  async addScreenshotToBatch() {
+    if (!this.isReady) {
+      logger.warn("Batch screenshot requested before application ready");
+      return;
+    }
+    
+    // Max 5 screenshots to avoid excessive token usage and limits
+    if (this.screenshotQueue.length >= 5) {
+      this.broadcastOCRError("Maximum of 5 queued screenshots reached. Send them first.");
+      return;
+    }
+
+    const startTime = Date.now();
+
+    try {
+      // Temporarily hide all windows
+      windowManager.windows.forEach(win => {
+        if (!win.isDestroyed() && win.isVisible()) {
+          win.hide();
+          win._wasVisible = true;
+        }
+      });
+
+      // Small delay for OS
+      await new Promise(resolve => setTimeout(resolve, 150));
+
+      const capture = await captureService.captureAndProcess();
+
+      // Restore windows
+      windowManager.windows.forEach(win => {
+        if (!win.isDestroyed() && win._wasVisible) {
+          windowManager.showOnCurrentDesktop(win);
+          win._wasVisible = false;
+        }
+      });
+
+      if (!capture || !capture.imageBuffer || !capture.imageBuffer.length) {
+        this.broadcastOCRError("Failed to capture screenshot for batch");
+        return;
+      }
+
+      this.screenshotQueue.push(capture);
+      
+      logger.info("Screenshot added to batch", { queueSize: this.screenshotQueue.length });
+      
+      windowManager.broadcastToAllWindows('screenshot-queued', {
+        count: this.screenshotQueue.length
+      });
+
+    } catch (error) {
+      logger.error("Add screenshot to batch failed", {
+        error: error.message,
+        duration: Date.now() - startTime,
+      });
+      this.broadcastOCRError(error.message);
+    }
+  }
+
+  async sendBatchScreenshots() {
+    if (!this.isReady) return;
+    
+    if (this.screenshotQueue.length === 0) {
+      logger.warn("Cannot send empty screenshot batch");
+      return;
+    }
+
+    const startTime = Date.now();
+    const batchSize = this.screenshotQueue.length;
+    logger.info("Sending screenshot batch", { count: batchSize });
+    
+    // Shallow copy the queue to process, then immediately clear the instance queue
+    const processingQueue = [...this.screenshotQueue];
+    this.screenshotQueue = [];
+    
+    // Broadcast the clear state immediately to hide the badge
+    windowManager.broadcastToAllWindows('screenshot-queued', {
+      count: 0
+    });
+
+    try {
+      windowManager.showLLMLoading();
+
+      const sessionHistory = sessionManager.getOptimizedHistory();
+
+      const skillsRequiringProgrammingLanguage = ['dsa'];
+      const needsProgrammingLanguage = skillsRequiringProgrammingLanguage.includes(this.activeSkill);
+
+      const lang = this.codingLanguage === 'auto' ? null : this.codingLanguage;
+      
+      const llmResult = await llmService.processMultipleImagesWithSkill(
+        processingQueue,
+        this.activeSkill,
+        sessionHistory.recent,
+        needsProgrammingLanguage ? lang : null
+      );
+
+      // Record model response in session
+      sessionManager.addModelResponse(llmResult.response, {
+        skill: this.activeSkill,
+        processingTime: llmResult.metadata.processingTime,
+        usedFallback: llmResult.metadata.usedFallback,
+        isImageAnalysis: true,
+        batchSize: batchSize
+      });
+
+      // Send the response directly to the chat window
+      windowManager.hideLLMResponse();
+      
+      const chatWin = windowManager.windows.get('chat');
+      if (chatWin) {
+        windowManager.showOnCurrentDesktop(chatWin);
+      }
+
+      windowManager.broadcastToAllWindows('llm-response', {
+        response: llmResult.response,
+        skill: this.activeSkill,
+        processingTime: llmResult.metadata.processingTime,
+        usedFallback: llmResult.metadata.usedFallback,
+        isImageAnalysis: true
+      });
+
+      this.broadcastLLMSuccess(llmResult);
+    } catch (error) {
+      logger.error("Batch screenshot OCR process failed", {
+        error: error.message,
+        duration: Date.now() - startTime,
+      });
+
+      windowManager.hideLLMResponse();
+      this.broadcastOCRError(error.message);
+      
+      sessionManager.addConversationEvent({
+        role: 'system',
+        content: `Batch screenshot OCR failed: ${error.message}`,
         action: 'ocr_error',
         metadata: {
           error: error.message

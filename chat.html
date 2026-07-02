@@ -413,6 +413,32 @@
         backdrop-filter: blur(10px);
         flex-shrink: 0;
       }
+      .recording-indicator {
+        display: none;
+        align-items: center;
+        gap: 6px;
+        background: rgba(244, 67, 54, 0.15);
+        border: 1px solid rgba(244, 67, 54, 0.3);
+        padding: 4px 10px;
+        border-radius: 12px;
+        font-size: 11px;
+        color: #ff5252;
+      }
+      .batch-badge {
+        display: none;
+        align-items: center;
+        gap: 4px;
+        background: rgba(33, 150, 243, 0.15);
+        border: 1px solid rgba(33, 150, 243, 0.3);
+        padding: 4px 8px;
+        border-radius: 6px;
+        font-size: 11px;
+        color: #64b5f6;
+        font-weight: 600;
+        cursor: default;
+        user-select: none;
+        -webkit-app-region: no-drag;
+      }
       .input-container {
         display: flex;
         align-items: center;
@@ -820,6 +846,19 @@
           <div class="recording-indicator" id="recordingIndicator"></div>
         </div>
         <div class="header-actions">
+          <div class="batch-badge" id="batchBadge" title="Screenshots queued for batch">
+            📷 &times;<span id="batchCount">0</span>
+          </div>
+          <div class="custom-dropdown" id="skillDropdown">
+            <button class="custom-dropdown-btn" title="Set AI Skill">
+              <span class="label">General</span>
+              <span class="arrow">▼</span>
+            </button>
+            <div class="custom-dropdown-menu">
+              <div class="custom-dropdown-item selected" data-value="general">General</div>
+              <div class="custom-dropdown-item" data-value="dsa">DSA (Coding)</div>
+            </div>
+          </div>
           <div class="custom-dropdown" id="codingLangDropdown">
             <button class="custom-dropdown-btn" title="Set Coding Language">
               <span class="label">Auto-Detect Lang</span>
@@ -879,6 +918,8 @@
           <h2>⌨ Keyboard Shortcuts</h2>
           <div class="shortcut-row"><span class="shortcut-label">Screenshot & Analyze</span><span class="shortcut-key">Ctrl+S</span></div>
           <div class="shortcut-row"><span class="shortcut-label">Screenshot (Alt)</span><span class="shortcut-key">Ctrl+Shift+S</span></div>
+          <div class="shortcut-row"><span class="shortcut-label">Batch: Add Screenshot</span><span class="shortcut-key">Ctrl+Shift+A</span></div>
+          <div class="shortcut-row"><span class="shortcut-label">Batch: Send All</span><span class="shortcut-key">Ctrl+Shift+D</span></div>
           <div class="shortcut-row"><span class="shortcut-label">Cycle Response Mode</span><span class="shortcut-key">Ctrl+Shift+X</span></div>
           <div class="shortcut-row"><span class="shortcut-label">Toggle Recording</span><span class="shortcut-key">Alt+R</span></div>
           <div class="shortcut-row"><span class="shortcut-label">Toggle Stealth Mode</span><span class="shortcut-key">Alt+A</span></div>
@@ -959,6 +1000,7 @@
 
       setupCustomDropdown(document.getElementById('responseModeDropdown'), 'set-response-mode');
       setupCustomDropdown(document.getElementById('codingLangDropdown'), 'set-coding-language');
+      setupCustomDropdown(document.getElementById('skillDropdown'), 'update-skill');
 
       // Listen for response mode changes from backend (e.g. Ctrl+X shortcut)
       if (window.electronAPI && window.electronAPI.onResponseModeChanged) {
@@ -991,6 +1033,23 @@
           const overlay = document.getElementById('shortcutOverlay');
           if (overlay) {
             overlay.classList.toggle('visible');
+          }
+        });
+      }
+
+      // Listen for screenshot-queued updates
+      if (window.electronAPI && window.electronAPI.onScreenshotQueued) {
+        window.electronAPI.onScreenshotQueued((event, data) => {
+          const badge = document.getElementById('batchBadge');
+          const countSpan = document.getElementById('batchCount');
+          if (badge && countSpan) {
+            const count = data.count || 0;
+            if (count > 0) {
+              badge.style.display = 'flex';
+              countSpan.textContent = count;
+            } else {
+              badge.style.display = 'none';
+            }
           }
         });
       }
@@ -1414,9 +1473,17 @@
         const blocks = extractCodeBlocks(response);
         const textOnly = stripCodeBlocks(response, blocks);
 
-        // Add text response only - code snippets are not shown in the chat
+        // Add text response if available
         if (textOnly && textOnly.trim().length) {
           firstElement = addMessage(textOnly, 'assistant');
+        }
+
+        // Always render code snippets in the chat UI
+        if (blocks && blocks.length > 0) {
+          blocks.forEach(block => {
+            const el = addCodeSnippet(block.language, block.code, false);
+            if (!firstElement) firstElement = el;
+          });
         }
 
         // After all content is rendered, scroll to the FIRST element of the response

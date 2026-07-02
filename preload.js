@@ -100,6 +100,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onCodingLanguageChanged: (callback) => ipcRenderer.on('coding-language-changed', callback),
   onResponseModeChanged: (callback) => ipcRenderer.on('response-mode-changed', callback),
   onToggleShortcutHelp: (callback) => ipcRenderer.on('toggle-shortcut-help', callback),
+  onScreenshotQueued: (callback) => ipcRenderer.on('screenshot-queued', callback),
   
   // Generic receive method
   receive: (channel, callback) => ipcRenderer.on(channel, callback),
@@ -120,7 +121,9 @@ contextBridge.exposeInMainWorld('api', {
             'window-loaded',
             'set-response-mode',
             'set-coding-language',
-            'trigger-screenshot'
+            'trigger-screenshot',
+            'add-screenshot-to-batch',
+            'send-batch-screenshots'
         ];
         if (validChannels.includes(channel)) {
             ipcRenderer.send(channel, data);

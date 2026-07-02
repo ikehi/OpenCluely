@@ -40,14 +40,14 @@ class ConfigManager {
 
       llm: {
         groq: {
-          model: 'llama-3.1-8b-instant',
-          visionModel: 'llama-4-scout-17b-16e-instruct',
+          model: 'llama-3.3-70b-versatile',
+          visionModel: 'meta-llama/llama-4-scout-17b-16e-instruct',
           maxRetries: 5,
           timeout: 60000,
           fallbackEnabled: true,
           generation: {
             temperature: 0.7,
-            max_tokens: 350,
+            max_tokens: 2048,
             top_p: 0.95
           }
         }
