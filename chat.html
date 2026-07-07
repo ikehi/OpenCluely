@@ -856,6 +856,7 @@
             </button>
             <div class="custom-dropdown-menu">
               <div class="custom-dropdown-item selected" data-value="general">General</div>
+              <div class="custom-dropdown-item" data-value="programming">Programming</div>
               <div class="custom-dropdown-item" data-value="dsa">DSA (Coding)</div>
             </div>
           </div>
@@ -920,6 +921,8 @@
           <div class="shortcut-row"><span class="shortcut-label">Screenshot (Alt)</span><span class="shortcut-key">Ctrl+Shift+S</span></div>
           <div class="shortcut-row"><span class="shortcut-label">Batch: Add Screenshot</span><span class="shortcut-key">Ctrl+Shift+A</span></div>
           <div class="shortcut-row"><span class="shortcut-label">Batch: Send All</span><span class="shortcut-key">Ctrl+Shift+D</span></div>
+          <div class="shortcut-row"><span class="shortcut-label">Cycle Skill Up (General → Programming → DSA)</span><span class="shortcut-key">Ctrl+Up</span></div>
+          <div class="shortcut-row"><span class="shortcut-label">Cycle Skill Down (DSA → Programming → General)</span><span class="shortcut-key">Ctrl+Down</span></div>
           <div class="shortcut-row"><span class="shortcut-label">Cycle Response Mode</span><span class="shortcut-key">Ctrl+Shift+X</span></div>
           <div class="shortcut-row"><span class="shortcut-label">Toggle Recording</span><span class="shortcut-key">Alt+R</span></div>
           <div class="shortcut-row"><span class="shortcut-label">Toggle Stealth Mode</span><span class="shortcut-key">Alt+A</span></div>
@@ -1033,6 +1036,26 @@
           const overlay = document.getElementById('shortcutOverlay');
           if (overlay) {
             overlay.classList.toggle('visible');
+          }
+        });
+      }
+
+      // Listen for skill updates from backend (e.g. Ctrl+Up/Down shortcuts)
+      if (window.api) {
+        window.api.receive('skill-updated', (data) => {
+          if (data && data.skill) {
+            const dropdown = document.getElementById('skillDropdown');
+            if (dropdown) {
+              const label = dropdown.querySelector('.label');
+              const items = dropdown.querySelectorAll('.custom-dropdown-item');
+              items.forEach(item => {
+                item.classList.remove('selected');
+                if (item.dataset.value === data.skill) {
+                  item.classList.add('selected');
+                  if (label) label.textContent = item.textContent;
+                }
+              });
+            }
           }
         });
       }

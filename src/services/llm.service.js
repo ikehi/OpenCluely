@@ -76,7 +76,42 @@ class LLMService {
 
       const base64Image = imageBuffer.toString('base64');
       const imageUrl = `data:${mimeType};base64,${base64Image}`;
+      
+      const isCodingSkill = ['dsa', 'programming'].includes(activeSkill);
 
+      if (isCodingSkill) {
+        // --- STAGE 1: EXTRACTION (Vision Model) ---
+        logger.info('[Pipeline Stage 1] Extracting text from single image via Vision Model');
+        const extractionMessages = [{
+          role: 'user',
+          content: [
+            { type: 'text', text: "You are an OCR and requirements-extraction expert. Extract all text, code snippets, constraints, and architectural requirements from this image verbatim. Do not attempt to solve the problem or write the final code. Just perfectly extract the raw requirements into text." },
+            { type: 'image_url', image_url: { url: imageUrl } }
+          ]
+        }];
+        
+        // Use a small temp override for extraction tokens to ensure we don't blow the limit
+        const sessionManager = require('../managers/session.manager');
+        const originalMode = sessionManager.getResponseMode();
+        sessionManager.setResponseMode('medium'); // forces vision output budget to ~1500 max
+        
+        let extractedText = '';
+        try {
+          extractedText = await this.executeRequest(extractionMessages, true);
+        } finally {
+          sessionManager.setResponseMode(originalMode);
+        }
+        
+        // --- STAGE 2: GENERATION (Text Model) ---
+        logger.info('[Pipeline Stage 2] Generating final code via Text Model', { extractedTextLength: extractedText.length });
+        const generationPayload = `Please act as the Principal Staff Engineer and implement the following architectural requirements completely, following all system prompt rules. Do not just repeat the requirements; write the full code solution.\n\n=== EXTRACTED REQUIREMENTS ===\n${extractedText}\n==============================`;
+        
+        const finalResult = await this.processTextWithSkill(generationPayload, activeSkill, sessionMemory, programmingLanguage);
+        finalResult.metadata.isImageAnalysis = true; // flag it so UI knows it started as an image
+        return finalResult;
+      }
+
+      // Default single-stage execution for non-coding skills
       const messages = [];
 
       if (skillPrompt && skillPrompt.trim().length > 0) {
@@ -153,6 +188,46 @@ class LLMService {
       const { promptLoader } = require('../../prompt-loader');
       const skillPrompt = promptLoader.getSkillPrompt(activeSkill, programmingLanguage) || '';
 
+      const isCodingSkill = ['dsa', 'programming'].includes(activeSkill);
+
+      if (isCodingSkill) {
+        // --- STAGE 1: EXTRACTION (Vision Model) ---
+        logger.info('[Pipeline Stage 1] Extracting text from multiple images via Vision Model');
+        const contentArray = [
+          { type: 'text', text: "You are an OCR and requirements-extraction expert. Extract all text, code snippets, constraints, and architectural requirements from these images verbatim. Do not attempt to solve the problem or write the final code. Just perfectly extract the raw requirements into text." }
+        ];
+        
+        images.forEach((img) => {
+          const base64Image = img.imageBuffer.toString('base64');
+          const imageUrl = `data:${img.mimeType || 'image/png'};base64,${base64Image}`;
+          contentArray.push({ type: 'image_url', image_url: { url: imageUrl } });
+        });
+
+        const extractionMessages = [{ role: 'user', content: contentArray }];
+        
+        // Use a small temp override for extraction tokens
+        const sessionManager = require('../managers/session.manager');
+        const originalMode = sessionManager.getResponseMode();
+        sessionManager.setResponseMode('medium');
+        
+        let extractedText = '';
+        try {
+          extractedText = await this.executeRequest(extractionMessages, true);
+        } finally {
+          sessionManager.setResponseMode(originalMode);
+        }
+        
+        // --- STAGE 2: GENERATION (Text Model) ---
+        logger.info('[Pipeline Stage 2] Generating final code via Text Model', { extractedTextLength: extractedText.length });
+        const generationPayload = `Please act as the Principal Staff Engineer and implement the following architectural requirements completely, following all system prompt rules. Do not just repeat the requirements; write the full code solution.\n\n=== EXTRACTED REQUIREMENTS ===\n${extractedText}\n==============================`;
+        
+        const finalResult = await this.processTextWithSkill(generationPayload, activeSkill, sessionMemory, programmingLanguage);
+        finalResult.metadata.isImageAnalysis = true;
+        finalResult.metadata.imageCount = images.length;
+        return finalResult;
+      }
+
+      // Default single-stage execution for non-coding skills
       const messages = [];
 
       if (skillPrompt && skillPrompt.trim().length > 0) {
@@ -248,7 +323,7 @@ class LLMService {
       });
 
       const messages = this.buildGroqRequest(text, activeSkill, sessionMemory, programmingLanguage);
-      const responseText = await this.executeRequest(messages);
+      const responseText = await this.executeRequestWithFallback(messages);
 
       const finalResponse = programmingLanguage
         ? this.enforceProgrammingLanguage(responseText, programmingLanguage)
@@ -303,7 +378,7 @@ class LLMService {
       });
 
       const messages = this.buildIntelligentTranscriptionRequest(text, activeSkill, sessionMemory, programmingLanguage);
-      const responseText = await this.executeRequest(messages);
+      const responseText = await this.executeRequestWithFallback(messages);
 
       const finalResponse = programmingLanguage
         ? this.enforceProgrammingLanguage(responseText, programmingLanguage)
@@ -359,8 +434,14 @@ class LLMService {
   buildGroqRequest(text, activeSkill, sessionMemory, programmingLanguage) {
     const sessionManager = require('../managers/session.manager');
 
+    const codingSkills = ['dsa', 'programming'];
+
     if (sessionManager && typeof sessionManager.getConversationHistory === 'function') {
-      const conversationHistory = sessionManager.getConversationHistory(4);
+      // For coding skills, skip history entirely — each question is self-contained
+      // and past code responses are too large and push requests over the TPM limit.
+      const conversationHistory = codingSkills.includes(activeSkill)
+        ? []
+        : sessionManager.getConversationHistory(4);
       const skillContext = sessionManager.getSkillContext(activeSkill, programmingLanguage);
       return this.buildGroqRequestWithHistory(text, activeSkill, conversationHistory, skillContext, programmingLanguage);
     }
@@ -421,8 +502,14 @@ class LLMService {
 
     const sessionManager = require('../managers/session.manager');
 
+    const codingSkills = ['dsa', 'programming'];
+
     if (sessionManager && typeof sessionManager.getConversationHistory === 'function') {
-      const conversationHistory = sessionManager.getConversationHistory(4);
+      // For coding skills, skip history — each question is self-contained.
+      // Previous code responses are too large and push requests over the TPM limit.
+      const conversationHistory = codingSkills.includes(activeSkill)
+        ? []
+        : sessionManager.getConversationHistory(4);
       const skillContext = sessionManager.getSkillContext(activeSkill, programmingLanguage);
       return this.buildIntelligentTranscriptionRequestWithHistory(cleanText, activeSkill, conversationHistory, skillContext, programmingLanguage);
     }
@@ -471,30 +558,32 @@ class LLMService {
   getIntelligentTranscriptionPrompt(activeSkill, programmingLanguage, documentContext = null) {
     const sessionManager = require('../managers/session.manager');
     const mode = sessionManager.getResponseMode();
-    let prompt = `You are whispering answers to an interviewee during a live interview. The transcription has both the interviewer and interviewee's voice — ONLY answer the interviewer's questions. Ignore anything the interviewee says.
 
-ABSOLUTE RULES:`;
+    // For coding-related skills, bypass the interview-whispering prompt entirely.
+    // Instead, use the skill's own system prompt which enforces optimal code output.
+    const codingSkills = ['dsa', 'programming'];
+    if (codingSkills.includes(activeSkill)) {
+      const skillPrompt = promptLoader.getSkillPrompt(activeSkill, programmingLanguage) || '';
+      // Append a mode-aware instruction on top of the skill prompt
+      let modeInstruction = '';
+      if (mode === 'simple') {
+        modeInstruction = '\n\nIMPORTANT: The user selected "Simple" mode — provide ONLY the final code with no explanation whatsoever.';
+      } else if (mode === 'medium') {
+        modeInstruction = '\n\nIMPORTANT: The user selected "Medium" mode — provide a one-line approach summary, then the complete code.';
+      } else {
+        modeInstruction = '\n\nIMPORTANT: The user selected "Complex" mode — briefly state the optimal time/space approach, then provide the complete runnable code, then a short complexity analysis.';
+      }
+      return skillPrompt + modeInstruction;
+    }
+
+    let prompt = `You are whispering answers to an interviewee during a live interview. The transcription has both the interviewer and interviewee's voice — ONLY answer the interviewer's questions. Ignore anything the interviewee says.\n\nABSOLUTE RULES:`;
 
     if (mode === 'simple') {
-      prompt += `
-- Answer in 1-2 sentences only. Be extremely concise.
-- NEVER use bullet points, numbered lists, headers, bold, markdown, or any formatting. Only plain flowing sentences.
-- NEVER include code.
-- Sound like a confident person speaking casually.`;
+      prompt += `\n- Answer in 1-2 sentences only. Be extremely concise.\n- NEVER use bullet points, numbered lists, headers, bold, markdown, or any formatting. Only plain flowing sentences.\n- NEVER include code.\n- Sound like a confident person speaking casually.`;
     } else if (mode === 'medium') {
-      prompt += `
-- Your answer must be 1-2 short paragraphs.
-- NEVER use bullet points, numbered lists, headers, bold, markdown, or any formatting. Only plain flowing sentences.
-- NEVER include code.
-- Sound like a confident person speaking casually.`;
+      prompt += `\n- Your answer must be 1-2 short paragraphs.\n- NEVER use bullet points, numbered lists, headers, bold, markdown, or any formatting. Only plain flowing sentences.\n- NEVER include code.\n- Sound like a confident person speaking casually.`;
     } else {
-      prompt += `
-- Your answer must be 2-3 SHORT paragraphs. Each paragraph is 2 sentences max. No exceptions, even for complex questions.
-- NEVER use bullet points, numbered lists, headers, bold, markdown, or any formatting. Only plain flowing sentences.
-- NEVER give each sub-topic its own paragraph. Blend everything together tightly.
-- NEVER include code.
-- Sound like a confident person speaking casually — use filler words like "so", "actually", "you know", "honestly" naturally. Do not sound like a textbook.
-- For simple questions (naming, listing, yes/no), answer in 1-2 sentences only.`;
+      prompt += `\n- Your answer must be 2-3 SHORT paragraphs. Each paragraph is 2 sentences max. No exceptions, even for complex questions.\n- NEVER use bullet points, numbered lists, headers, bold, markdown, or any formatting. Only plain flowing sentences.\n- NEVER give each sub-topic its own paragraph. Blend everything together tightly.\n- NEVER include code.\n- Sound like a confident person speaking casually — use filler words like "so", "actually", "you know", "honestly" naturally. Do not sound like a textbook.\n- For simple questions (naming, listing, yes/no), answer in 1-2 sentences only.`;
     }
 
     if (documentContext) {
@@ -514,11 +603,39 @@ ABSOLUTE RULES:`;
     let maxTokens = 2500;
     if (mode === 'simple') maxTokens = 450;
     if (mode === 'medium') maxTokens = 850;
-    
+
+    const activeSkill = sessionManager.currentSkill;
+    const isCodingSkill = ['dsa', 'programming'].includes(activeSkill);
+
     // Fast model rotation pool — each model has independent rate limits on Groq free tier
-    const modelPool = isVision
+    let modelPool = isVision
       ? ['meta-llama/llama-4-scout-17b-16e-instruct']
       : ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'llama3-8b-8192', 'gemma2-9b-it'];
+
+    // Enforce specific high-tier models for coding tasks to ensure senior-level quality
+    if (isCodingSkill) {
+      if (isVision) {
+        // qwen3.6-27b natively supports vision on Groq, making it perfect for coding screenshots
+        modelPool = ['qwen/qwen3.6-27b'];
+      } else {
+        modelPool = [
+          'openai/gpt-oss-120b',
+          'qwen/qwen3.6-27b',
+          'openai/gpt-oss-20b'
+        ];
+      }
+      // TPM limit for these models is 8000 (input + output combined).
+      // If vision is used, images consume ~3000-5000 tokens. We must drastically lower maxTokens to fit the 8000 limit.
+      if (isVision) {
+        if (mode === 'complex') maxTokens = 2500;
+        else if (mode === 'medium') maxTokens = 1500;
+      } else {
+        // Standard text-only coding request
+        if (mode === 'complex') maxTokens = 6000;
+        else if (mode === 'medium') maxTokens = 3500;
+      }
+      // simple stays at 450
+    }
 
     const payload = {
       messages,
@@ -564,8 +681,8 @@ ABSOLUTE RULES:`;
             keyIndex: clientIndex
           });
 
-          // If rate limited, instantly try next key for the SAME model
-          if (errorInfo.type === 'RATE_LIMIT_ERROR') {
+          // If rate limited OR request too large (TPM), try next key — each key has an independent bucket
+          if (errorInfo.type === 'RATE_LIMIT_ERROR' || errorInfo.type === 'REQUEST_TOO_LARGE_ERROR') {
             continue;
           }
 
@@ -583,9 +700,9 @@ ABSOLUTE RULES:`;
       if (lastError) {
         const errorInfo = this.analyzeError(lastError);
 
-        // If rate limited across all keys, switch model instantly
-        if (errorInfo.type === 'RATE_LIMIT_ERROR' && i < modelPool.length - 1) {
-          logger.info(`Rate limited across all keys for ${payload.model}, instantly switching to ${modelPool[i + 1]}`);
+        // If rate limited or too large across all keys, switch model instantly
+        if ((errorInfo.type === 'RATE_LIMIT_ERROR' || errorInfo.type === 'REQUEST_TOO_LARGE_ERROR') && i < modelPool.length - 1) {
+          logger.info(`All keys exhausted for ${payload.model} (${errorInfo.type}), instantly switching to ${modelPool[i + 1]}`);
           continue;
         }
 
@@ -603,6 +720,36 @@ ABSOLUTE RULES:`;
     }
 
     throw new Error(`All Groq models and keys exhausted. Last error: ${lastError ? lastError.message : 'Unknown'}`);
+  }
+
+  // 413 fallback — if ALL preferred coding models rejected the request because it was too
+  // large, retry once with the standard model pool which has a much higher context limit.
+  async executeRequestWithFallback(messages, isVision = false) {
+    const sessionManager = require('../managers/session.manager');
+    const activeSkill = sessionManager.currentSkill;
+    const isCodingSkill = ['dsa', 'programming'].includes(activeSkill) && !isVision;
+
+    try {
+      return await this.executeRequest(messages, isVision);
+    } catch (error) {
+      // Only fall back when in coding mode AND the failure was a 413 (request too large)
+      const is413 = error.message.includes('413') || error.message.includes('Request too large') || error.message.includes('reduce your message size');
+      if (isCodingSkill && is413) {
+        logger.warn('Coding model pool rejected request as too large — falling back to standard model pool', {
+          activeSkill,
+          errorPreview: error.message.substring(0, 120)
+        });
+        // Temporarily override currentSkill so executeRequest picks the standard pool
+        const originalSkill = sessionManager.currentSkill;
+        sessionManager.currentSkill = '_fallback';
+        try {
+          return await this.executeRequest(messages, isVision);
+        } finally {
+          sessionManager.currentSkill = originalSkill;
+        }
+      }
+      throw error;
+    }
   }
 
   async performPreflightCheck() {
@@ -628,8 +775,12 @@ ABSOLUTE RULES:`;
       return { type: 'AUTH_ERROR', isNetworkError: false };
     }
 
-    if (errorMessage.includes('rate limit') || errorMessage.includes('too many requests')) {
+    if (errorMessage.includes('rate limit') || errorMessage.includes('too many requests') || errorMessage.includes('429')) {
       return { type: 'RATE_LIMIT_ERROR', isNetworkError: false };
+    }
+
+    if (errorMessage.includes('413') || errorMessage.includes('request too large') || errorMessage.includes('reduce your message size')) {
+      return { type: 'REQUEST_TOO_LARGE_ERROR', isNetworkError: false };
     }
 
     return { type: 'UNKNOWN_ERROR', isNetworkError: false };

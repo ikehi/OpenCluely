@@ -790,6 +790,8 @@ class ApplicationController {
 
   navigateSkill(direction) {
     const availableSkills = [
+      "general",
+      "programming",
       "dsa",
     ];
 
