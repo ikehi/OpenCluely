@@ -474,18 +474,7 @@ class MainWindowUI {
                 }
             });
             
-            // Global keyboard shortcuts
-            document.addEventListener('keydown', (e) => {
-                if (e.altKey && e.key === 'r' && this.isInteractive) {
-                    e.preventDefault();
-                    if (!this.speechAvailable) return; // guard when unavailable
-                    if (this.isRecording) {
-                        window.electronAPI.stopSpeechRecognition();
-                    } else {
-                        window.electronAPI.startSpeechRecognition();
-                    }
-                }
-            });
+            // Alt+R is handled by the global shortcut in main.js — avoid double toggle here
         }
         
         // Also listen via the api interface for backup

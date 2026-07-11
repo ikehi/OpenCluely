@@ -1339,6 +1339,7 @@
 
       // Recording Event Handlers
       function handleRecordingStarted() {
+        if (isRecording) return;
         isRecording = true;
 
         if (recordingIndicator) {
@@ -1349,9 +1350,11 @@
         }
 
         showListeningAnimation();
+        addMessage('Listening...', 'system');
       }
 
       function handleRecordingStopped() {
+        if (!isRecording) return;
         isRecording = false;
 
         if (recordingIndicator) {
@@ -1362,7 +1365,7 @@
         }
 
         hideListeningAnimation();
-        addMessage('Stopped Listening', 'system');
+        addMessage('Stopped listening', 'system');
       }
 
       function handleTranscription(text) {
@@ -1553,17 +1556,14 @@
           }
         });
 
-        // Listen for speech status
+        // Listen for speech status (init/availability only — not start/stop; those use recording-* events)
         whysperAPI.onSpeechStatus((event, data) => {
-          if (data && data.status) {
-            addMessage(data.status, 'system');
-
-            if (data.status.includes('started') || data.status.includes('Recording')) {
-              handleRecordingStarted();
-            } else if (data.status.includes('stopped') || data.status.includes('ended')) {
-              handleRecordingStopped();
-            }
+          if (!data || !data.status) return;
+          const status = data.status.toLowerCase();
+          if (status.includes('stopped') || status.includes('started') || status.includes('recording')) {
+            return;
           }
+          addMessage(data.status, 'system');
         });
 
         // Listen for speech errors
@@ -1690,14 +1690,7 @@
         });
       }
 
-      // Global keyboard shortcuts
-      document.addEventListener('keydown', (e) => {
-        if (e.altKey && e.key === 'r') {
-          e.preventDefault();
-          if (!isInteractive || !speechAvailable) return;
-          micButton && micButton.click();
-        }
-      });
+      // Alt+R is handled by the global shortcut in main.js — do not also toggle here (causes double stop/start)
 
       // Initialize
       if (!chatHistory || chatHistory.length === 0) {

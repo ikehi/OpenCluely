@@ -141,7 +141,6 @@ class SpeechService extends EventEmitter {
       case 'recording-stopped':
         this.isRecording = false;
         this.emit('recording-stopped');
-        this.emit('status', 'Recording stopped');
         break;
 
       case 'transcription':
