@@ -372,28 +372,61 @@ class ChatWindowUI {
         return messageDiv;
     }
 
-    // Split AI response into plain text and code snippets and append to chat
+    // Render the full AI response as a single unified message bubble, keeping
+    // code blocks inline with surrounding text in their original order.
     renderAssistantResponse(response) {
         if (!response || typeof response !== 'string') return;
-        const blocks = this.extractCodeBlocks(response);
-        const textOnly = this.stripCodeBlocks(response, blocks);
-        
-        let firstElement = null;
-        
-        if (textOnly && textOnly.trim().length) {
-            firstElement = this.addMessage(textOnly, 'assistant', false);
-        }
-        
-        blocks.forEach(b => {
-            const el = this.addCodeSnippet(b.language, b.code);
-            if (!firstElement) firstElement = el;
-        });
 
-        if (firstElement) {
-            setTimeout(() => {
-                firstElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }, 100);
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message assistant';
+
+        const timeDiv = document.createElement('div');
+        timeDiv.className = 'message-time';
+        timeDiv.textContent = new Date().toLocaleTimeString();
+
+        const textDiv = document.createElement('div');
+        textDiv.className = 'message-text';
+
+        // Split the response into alternating text / code segments,
+        // preserving original order so steps and their code stay together.
+        const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
+        let lastIndex = 0;
+        let html = '';
+        let match;
+
+        while ((match = codeBlockRegex.exec(response)) !== null) {
+            // Text segment before this code block
+            const before = response.slice(lastIndex, match.index);
+            if (before.trim()) {
+                html += this.formatMarkdown(before);
+            }
+
+            // The code block itself, rendered inline
+            const lang = (match[1] || 'text').toUpperCase();
+            const escapedCode = this.escapeHtmlForSnippet((match[2] || '').trim());
+            html += `
+                <div style="margin:10px 0;">
+                    <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-bottom:4px;font-family:monospace;">▸ ${lang}</div>
+                    <pre style="margin:0;padding:10px;background:rgba(0,0,0,0.4);border-radius:6px;overflow-x:auto;font-size:12px;line-height:1.5;"><code>${escapedCode}</code></pre>
+                </div>`;
+
+            lastIndex = match.index + match[0].length;
         }
+
+        // Any remaining text after the last code block
+        const trailing = response.slice(lastIndex);
+        if (trailing.trim()) {
+            html += this.formatMarkdown(trailing);
+        }
+
+        textDiv.innerHTML = html;
+        messageDiv.appendChild(timeDiv);
+        messageDiv.appendChild(textDiv);
+        this.elements.chatMessages.appendChild(messageDiv);
+
+        setTimeout(() => {
+            messageDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
     }
 
     extractCodeBlocks(text) {
