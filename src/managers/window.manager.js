@@ -19,6 +19,7 @@ class WindowManager {
     this.isInitialized = false;
     this.isInitializing = false;
     this.isRecording = false;
+    this.visibleBeforeHide = new Set(['main']);
     
     // Add debouncing to prevent excessive operations
     this.lastEnforceTime = 0;
@@ -903,6 +904,10 @@ class WindowManager {
       this.showOnCurrentDesktop(targetWindow);
 
       this.activeWindow = windowType;
+
+      if (windowType === 'chat') {
+        this.focusChatWindow();
+      }
       
       logger.info('Switched to window', {
         windowType,
@@ -911,38 +916,69 @@ class WindowManager {
     }
   }
 
+  focusChatWindow() {
+    const chatWindow = this.windows.get('chat');
+    if (!chatWindow || chatWindow.isDestroyed()) return;
+
+    setTimeout(() => {
+      if (chatWindow.isDestroyed()) return;
+      try {
+        chatWindow.focus();
+        chatWindow.webContents.focus();
+        chatWindow.webContents.send('chat-focus-input');
+      } catch (error) {
+        logger.warn('Failed to focus chat window', { error: error.message });
+      }
+    }, 60);
+  }
+
   showAllWindows() {
     if (this.isScreenBeingShared) {
       return;
     }
 
-    this.windows.forEach((window, type) => {
-      if (type !== 'llmResponse') { // Don't show LLM response unless it has content
-        this.showOnCurrentDesktop(window);
+    const toRestore = (this.visibleBeforeHide && this.visibleBeforeHide.size > 0)
+      ? Array.from(this.visibleBeforeHide)
+      : ['main'];
+
+    toRestore.forEach((type) => {
+      if (type === 'llmResponse') return;
+      const win = this.windows.get(type);
+      if (win && !win.isDestroyed()) {
+        this.showOnCurrentDesktop(win);
       }
     });
     
     this.isVisible = true;
     const activeWindow = this.windows.get(this.activeWindow);
-    if (activeWindow) {
+    if (activeWindow && !activeWindow.isDestroyed()) {
       activeWindow.focus();
     }
     
     logger.info('All windows shown on current desktop', { 
       activeWindow: this.activeWindow,
+      restored: toRestore,
       windowCount: this.windows.size 
     });
   }
 
   hideAllWindows() {
+    this.visibleBeforeHide = new Set();
     this.windows.forEach((window, type) => {
+      if (!window.isDestroyed() && window.isVisible()) {
+        this.visibleBeforeHide.add(type);
+      }
       if (type !== 'llmResponse') {
         window.hide();
       }
     });
+
+    if (this.visibleBeforeHide.size === 0) {
+      this.visibleBeforeHide.add('main');
+    }
     
     this.isVisible = false;
-    logger.info('All windows hidden');
+    logger.info('All windows hidden', { visibleBeforeHide: Array.from(this.visibleBeforeHide) });
   }
 
   toggleVisibility() {
@@ -1600,6 +1636,7 @@ class WindowManager {
     const chatWindow = this.windows.get('chat');
     if (chatWindow && !chatWindow.isDestroyed()) {
       this.showOnCurrentDesktop(chatWindow);
+      this.focusChatWindow();
       logger.debug('Chat window shown');
     }
   }

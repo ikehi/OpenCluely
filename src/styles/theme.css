@@ -1,0 +1,329 @@
+/* OpenCluely Design System */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', monospace;
+
+  --bg-void: #06070c;
+  --bg-base: rgba(10, 12, 20, 0.92);
+  --bg-surface: rgba(18, 20, 32, 0.78);
+  --bg-elevated: rgba(26, 29, 46, 0.88);
+  --bg-input: rgba(255, 255, 255, 0.04);
+
+  --glass-bg: linear-gradient(155deg, rgba(28, 30, 48, 0.82) 0%, rgba(12, 14, 24, 0.9) 55%, rgba(8, 10, 18, 0.94) 100%);
+  --glass-border: rgba(255, 255, 255, 0.09);
+  --glass-border-strong: rgba(255, 255, 255, 0.14);
+  --glass-highlight: rgba(255, 255, 255, 0.04);
+
+  --text-primary: #f3f4fa;
+  --text-secondary: rgba(243, 244, 250, 0.72);
+  --text-muted: rgba(243, 244, 250, 0.48);
+  --text-faint: rgba(243, 244, 250, 0.32);
+
+  --accent: #818cf8;
+  --accent-strong: #6366f1;
+  --accent-soft: rgba(99, 102, 241, 0.14);
+  --accent-glow: rgba(99, 102, 241, 0.4);
+  --accent-cyan: #22d3ee;
+
+  --success: #34d399;
+  --success-soft: rgba(52, 211, 153, 0.12);
+  --warning: #fbbf24;
+  --warning-soft: rgba(251, 191, 36, 0.12);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.12);
+  --info: #38bdf8;
+  --info-soft: rgba(56, 189, 248, 0.12);
+
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 22px;
+  --radius-pill: 999px;
+
+  --shadow-sm: 0 2px 12px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 12px 40px rgba(0, 0, 0, 0.45);
+  --shadow-glow: 0 0 0 1px rgba(99, 102, 241, 0.2), 0 8px 32px rgba(99, 102, 241, 0.15);
+
+  --blur: 28px;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --transition: 0.2s var(--ease);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: var(--text-primary);
+}
+
+/* Glass surfaces */
+.glass-panel,
+.app-container,
+.chat-container,
+.settings-container {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--blur)) saturate(1.35);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.35);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-md), inset 0 1px 0 var(--glass-highlight);
+}
+
+.app-container,
+.chat-container,
+.settings-container {
+  border-radius: var(--radius-lg);
+}
+
+/* Headers */
+.app-header,
+.chat-header,
+.settings-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.header-title {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header-title i {
+  color: var(--accent);
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+/* Buttons */
+.btn,
+.icon-button,
+.send-button,
+.mic-button {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), color var(--transition), box-shadow var(--transition), transform var(--transition);
+}
+
+.btn:hover,
+.icon-button:hover,
+.send-button:hover,
+.mic-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--glass-border-strong);
+  color: var(--text-primary);
+}
+
+.btn.btn-primary {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.85), rgba(79, 70, 229, 0.9));
+  border-color: rgba(129, 140, 248, 0.4);
+  color: #fff;
+  box-shadow: var(--shadow-glow);
+}
+
+.btn.recording,
+.mic-button.recording {
+  background: linear-gradient(135deg, rgba(248, 113, 113, 0.9), rgba(239, 68, 68, 0.95));
+  border-color: rgba(248, 113, 113, 0.5);
+  color: #fff;
+  box-shadow: 0 0 20px rgba(248, 113, 113, 0.35);
+}
+
+/* Messages */
+.message {
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.03);
+  border-left: none;
+  position: relative;
+  animation: messageIn 0.28s var(--ease);
+}
+
+@keyframes messageIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.message.system {
+  background: var(--info-soft);
+  border-color: rgba(56, 189, 248, 0.2);
+}
+
+.message.user {
+  background: var(--warning-soft);
+  border-color: rgba(251, 191, 36, 0.2);
+}
+
+.message.transcription {
+  background: var(--success-soft);
+  border-color: rgba(52, 211, 153, 0.22);
+}
+
+.message.error {
+  background: var(--danger-soft);
+  border-color: rgba(248, 113, 113, 0.22);
+}
+
+.message.assistant {
+  background: var(--accent-soft);
+  border-color: rgba(99, 102, 241, 0.22);
+}
+
+.message-time {
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.message-text {
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.55;
+  letter-spacing: -0.01em;
+}
+
+.message.assistant code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--accent-cyan);
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+}
+
+.message.assistant pre {
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin: 10px 0;
+  overflow-x: auto;
+}
+
+/* Inputs */
+.input-field {
+  font-family: var(--font-sans);
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.input-field::placeholder {
+  color: var(--text-muted);
+}
+
+.input-container {
+  background: var(--bg-input);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.input-container:focus-within {
+  border-color: rgba(99, 102, 241, 0.45);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+/* Status */
+.status-dot.interactive,
+.active-indicator {
+  background: var(--success);
+  box-shadow: 0 0 12px rgba(52, 211, 153, 0.55);
+}
+
+.status-dot.non-interactive {
+  background: var(--danger);
+  box-shadow: 0 0 12px rgba(248, 113, 113, 0.45);
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-pill);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* Command bar (main overlay) */
+.command-tab {
+  height: 36px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border-strong);
+  box-shadow: var(--shadow-md), inset 0 1px 0 var(--glass-highlight);
+  padding: 0 6px;
+  gap: 4px;
+}
+
+.command-item {
+  border-radius: var(--radius-pill);
+  padding: 6px 11px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: background var(--transition), color var(--transition);
+}
+
+.command-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.command-item.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.command-item.recording i,
+.command-item.recording .cmd-icon {
+  color: var(--danger);
+}
+
+.command-separator {
+  width: 1px;
+  height: 18px;
+  background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.18), transparent);
+}

@@ -430,18 +430,14 @@ class ApplicationController {
     });
 
     ipcMain.handle("move-window", (event, { deltaX, deltaY }) => {
-      const mainWindow = windowManager.getWindow("main");
-      if (mainWindow) {
-        const [currentX, currentY] = mainWindow.getPosition();
-        const newX = currentX + deltaX;
-        const newY = currentY + deltaY;
-        mainWindow.setPosition(newX, newY);
-        logger.debug("Main window moved", {
-          deltaX,
-          deltaY,
-          from: { x: currentX, y: currentY },
-          to: { x: newX, y: newY },
-        });
+      if (windowManager.bindWindows) {
+        windowManager.moveBoundWindows(deltaX, deltaY);
+      } else {
+        const mainWindow = windowManager.getWindow("main");
+        if (mainWindow) {
+          const [currentX, currentY] = mainWindow.getPosition();
+          mainWindow.setPosition(currentX + deltaX, currentY + deltaY);
+        }
       }
       return { success: true };
     });
@@ -453,6 +449,10 @@ class ApplicationController {
     ipcMain.handle("clear-session-memory", () => {
       sessionManager.clear();
       windowManager.broadcastToAllWindows("session-cleared");
+      const chatWindow = windowManager.getWindow("chat");
+      if (chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible()) {
+        windowManager.focusChatWindow();
+      }
       return { success: true };
     });
 

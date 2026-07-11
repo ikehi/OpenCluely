@@ -101,6 +101,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onResponseModeChanged: (callback) => ipcRenderer.on('response-mode-changed', callback),
   onToggleShortcutHelp: (callback) => ipcRenderer.on('toggle-shortcut-help', callback),
   onScreenshotQueued: (callback) => ipcRenderer.on('screenshot-queued', callback),
+  onChatFocusInput: (callback) => ipcRenderer.on('chat-focus-input', callback),
   
   // Generic receive method
   receive: (channel, callback) => ipcRenderer.on(channel, callback),

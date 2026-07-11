@@ -3,837 +3,186 @@
   <head>
     <meta charset="UTF-8" />
     <title>Chat</title>
+    <link href="./src/styles/theme.css" rel="stylesheet" />
     <link href="./src/styles/common.css" rel="stylesheet" />
     <!-- Load Font Awesome via link instead of @import to avoid any raw CSS render issues -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
     <!-- PrismJS theme for syntax highlighting -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" />
     <style>
-      /* Font Awesome now loaded via <link> above */
-
       body {
         background: transparent !important;
         margin: 0;
         padding: 0;
         overflow: hidden;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-          sans-serif;
       }
 
       .chat-container {
         width: 100%;
         height: 100vh;
-        background: linear-gradient(
-          135deg,
-          rgba(0, 0, 0, 0.3) 0%,
-          rgba(20, 20, 20, 0.4) 100%
-        );
-        backdrop-filter: blur(25px);
-        border-radius: 12px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        box-shadow: 0 4px 25px rgba(0, 0, 0, 0.15);
         display: flex;
         flex-direction: column;
         -webkit-app-region: drag;
       }
+
       .chat-header {
-        padding: 16px 20px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
         -webkit-app-region: drag;
-        background: rgba(0, 0, 0, 0.2);
-        backdrop-filter: blur(10px);
-        cursor: default;
         flex-shrink: 0;
       }
-      .header-title {
-        color: rgba(255, 255, 255, 0.95);
-        font-size: 14px;
-        font-weight: 600;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-      }
-      /* Header actions (e.g., Clear History) */
+
       .header-actions {
         -webkit-app-region: no-drag;
         display: flex;
         align-items: center;
         gap: 8px;
       }
+
       .icon-button {
-        background: rgba(255, 255, 255, 0.12);
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        color: rgba(255, 255, 255, 0.9);
-        border-radius: 6px;
-        padding: 6px 10px;
+        padding: 7px 11px;
         cursor: default;
-        transition: all 0.2s ease;
+        -webkit-app-region: no-drag;
       }
-      .icon-button:hover {
-        background: rgba(255, 255, 255, 0.22);
-        color: #fff;
-      }
+
       .recording-indicator {
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: #ff4757;
+        background: var(--danger);
         animation: pulse 2s infinite;
         display: none;
-        box-shadow: 0 0 10px rgba(255, 71, 87, 0.5);
+        box-shadow: 0 0 10px rgba(248, 113, 113, 0.5);
       }
-      @keyframes pulse {
-        0% {
-          opacity: 1;
-          transform: scale(1);
-        }
-        50% {
-          opacity: 0.7;
-          transform: scale(1.1);
-        }
-        100% {
-          opacity: 1;
-          transform: scale(1);
-        }
-      }
+
       .chat-messages {
         flex: 1;
-        padding: 20px;
+        padding: 16px 18px;
         overflow-y: auto;
         overflow-x: hidden;
         -webkit-app-region: no-drag;
         box-sizing: border-box;
-        /* Removed max-height restriction */
-      }
-      .message {
-        margin-bottom: 6px;
-        padding: 12px 16px;
-        background: rgba(255, 255, 255, 0.08);
-        border-radius: 8px;
-        border-left: 3px solid rgba(255, 255, 255, 0.2);
-        backdrop-filter: blur(5px);
-        word-wrap: break-word;
-        word-break: break-word;
-        /* Removed all height restrictions */
-        position: relative;
-      }
-      .message.transcription {
-        background: rgba(76, 175, 80, 0.15);
-        animation: fadeInSlide 0.1s ease-out;
-        position: relative;
       }
 
-      .message.transcription::before {
-        position: absolute;
-        left: -8px;
-        top: 8px;
-        font-size: 12px;
-        color: white;
-        width: 20px;
-        height: 20px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+      .message.transcription {
+        animation: fadeInSlide 0.22s var(--ease);
       }
 
       @keyframes fadeInSlide {
-        from {
-          opacity: 0;
-          transform: translateX(-20px);
-          background: rgba(76, 175, 80, 0.3);
-        }
-        to {
-          opacity: 1;
-          transform: translateX(0);
-          background: rgba(76, 175, 80, 0.15);
-        }
+        from { opacity: 0; transform: translateX(-12px); }
+        to { opacity: 1; transform: translateX(0); }
       }
-      .message.system {
-        background: rgba(33, 150, 243, 0.1);
-      }
-      .message.error {
-        background: rgba(244, 67, 54, 0.1);
-      }
-      .message.user {
-        background: rgba(255, 152, 0, 0.1);
-      }
-      .message.assistant {
-        background: rgba(156, 39, 176, 0.1);
-        border-left: 3px solid #9c27b0;
-        /* Removed all height restrictions and overflow hidden */
-        display: block;
-      }
-      
+
       .message.assistant .message-text {
-        /* Removed all height restrictions and overflow hidden */
         white-space: pre-wrap;
         word-wrap: break-word;
-        word-break: break-word;
         overflow-wrap: break-word;
       }
-      
-      /* Ensure all content in assistant messages is fully visible */
+
       .message.assistant *,
-      .message.assistant .bullet-point,
-      .message.assistant .numbered-point,
-      .message.assistant strong,
-      .message.assistant em,
-      .message.assistant code,
       .message.assistant pre,
       .message.assistant ul,
-      .message.assistant ol,
-      .message.assistant li,
-      .message.assistant h1,
-      .message.assistant h2,
-      .message.assistant h3,
-      .message.assistant h4,
-      .message.assistant h5,
-      .message.assistant h6,
-      .message.assistant p,
-      .message.assistant blockquote {
-        /* Remove all height restrictions */
+      .message.assistant ol {
         height: auto !important;
         max-height: none !important;
         overflow: visible !important;
       }
-      
-      /* Markdown formatting for assistant messages */
-      .message.assistant .bullet-point {
-        margin: 4px 0;
-        padding-left: 8px;
-        line-height: 1.4;
-        word-wrap: break-word;
-        word-break: break-word;
-        overflow-wrap: break-word;
-      }
-      
-      .message.assistant .numbered-point {
-        margin: 4px 0;
-        padding-left: 16px;
-        line-height: 1.4;
-        position: relative;
-        counter-increment: list-counter;
-        word-wrap: break-word;
-        word-break: break-word;
-        overflow-wrap: break-word;
-      }
-      
-      .message.assistant .numbered-point::before {
-        content: counter(list-counter) ". ";
-        position: absolute;
-        left: 0;
-        font-weight: 500;
-        color: rgba(156, 39, 176, 0.8);
-      }
-      
-      .message.assistant {
-        counter-reset: list-counter;
-      }
-      
-      .message.assistant strong {
-        font-weight: 600;
-        color: rgba(255, 255, 255, 1);
-      }
-      
-      .message.assistant em {
-        font-style: italic;
-        color: rgba(255, 255, 255, 0.9);
-      }
-      
-      .message.assistant code {
-        background: rgba(0, 0, 0, 0.3);
-        padding: 2px 4px;
-        border-radius: 3px;
-        font-family: 'Monaco', 'Menlo', monospace;
-        font-size: 11px;
-        color: #64ffda;
-        display: inline;
-      }
-      
-      /* Ensure code blocks are fully visible */
-      .message.assistant pre {
-        background: rgba(0, 0, 0, 0.4);
-        padding: 8px 12px;
-        border-radius: 6px;
-        font-family: 'Monaco', 'Menlo', monospace;
-        font-size: 11px;
-        color: #64ffda;
-        overflow-x: auto;
-        white-space: pre-wrap;
-        word-wrap: break-word;
+
+      .message.assistant h1 { font-size: 16px; margin: 12px 0 8px; font-weight: 600; }
+      .message.assistant h2 { font-size: 15px; margin: 12px 0 8px; font-weight: 600; }
+      .message.assistant h3 { font-size: 14px; margin: 10px 0 6px; font-weight: 600; }
+      .message.assistant p { margin: 8px 0; }
+      .message.assistant blockquote {
+        border-left: 3px solid rgba(99, 102, 241, 0.45);
+        padding-left: 12px;
         margin: 8px 0;
-        position: relative;
-      }
-      
-      .message.assistant pre code {
-        background: transparent;
-        padding: 0;
-        border-radius: 0;
-        display: block;
+        color: var(--text-secondary);
       }
 
-      /* Copy button in code blocks */
       .copy-btn {
         position: absolute;
         top: 8px;
         right: 8px;
         background: rgba(0, 0, 0, 0.5);
-        color: rgba(255, 255, 255, 0.9);
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: var(--text-primary);
+        border: 1px solid var(--glass-border);
         padding: 4px 8px;
         font-size: 11px;
-        border-radius: 4px;
+        border-radius: var(--radius-xs);
         cursor: default;
         -webkit-app-region: no-drag;
-        transition: background 0.2s ease, border-color 0.2s ease, transform 0.12s ease;
-      }
-      .copy-btn:hover {
-        background: rgba(0,0,0,0.7);
+        transition: background var(--transition);
       }
       .copy-btn.copied {
-        background: rgba(76, 175, 80, 0.8);
-        border-color: rgba(76, 175, 80, 0.9);
-        transform: scale(0.98);
+        background: rgba(52, 211, 153, 0.85);
+        border-color: rgba(52, 211, 153, 0.5);
       }
-      
-      /* Ensure lists are fully visible */
-      .message.assistant ul,
-      .message.assistant ol {
-        margin: 8px 0;
-        padding-left: 20px;
-      }
-      
-      .message.assistant li {
-        margin: 4px 0;
-        line-height: 1.4;
-      }
-      
-      /* Ensure headings are fully visible */
-      .message.assistant h1,
-      .message.assistant h2,
-      .message.assistant h3,
-      .message.assistant h4,
-      .message.assistant h5,
-      .message.assistant h6 {
-        margin: 12px 0 8px 0;
-        font-weight: 600;
-        color: rgba(255, 255, 255, 1);
-      }
-      
-      .message.assistant h1 { font-size: 16px; }
-      .message.assistant h2 { font-size: 15px; }
-      .message.assistant h3 { font-size: 14px; }
-      .message.assistant h4,
-      .message.assistant h5,
-      .message.assistant h6 { font-size: 13px; }
-      
-      /* Ensure paragraphs are fully visible */
-      .message.assistant p {
-        margin: 8px 0;
-      }
-      
-      /* Ensure blockquotes are fully visible */
-      .message.assistant blockquote {
-        border-left: 3px solid rgba(156, 39, 176, 0.5);
-        padding-left: 12px;
-        margin: 8px 0;
-        font-style: italic;
-        color: rgba(255, 255, 255, 0.8);
-      }
-      
-      /* Thinking indicator animation */
-      .thinking-dots {
-        display: flex;
-        align-items: center;
-        gap: 2px;
-      }
-      
-      .thinking-dots .dot {
-        opacity: 0.4;
-        animation: thinking 1.4s infinite ease-in-out;
-      }
-      
-      .thinking-dots .dot:nth-child(1) { animation-delay: 0s; }
-      .thinking-dots .dot:nth-child(2) { animation-delay: 0.2s; }
-      .thinking-dots .dot:nth-child(3) { animation-delay: 0.4s; }
-      
-      @keyframes thinking {
-        0%, 80%, 100% {
-          opacity: 0.4;
-          transform: scale(1);
-        }
-        40% {
-          opacity: 1;
-          transform: scale(1.2);
-        }
-      }
-      
-      .message.thinking {
-        animation: fadeIn 0.3s ease-out;
-      }
-      
-      @keyframes fadeIn {
-        from {
-          opacity: 0;
-          transform: translateY(10px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
-      .message-time {
-        color: rgba(255, 255, 255, 0.6);
-        font-size: 11px;
-        margin-bottom: 4px;
-        font-weight: 500;
-      }
-      .message-text {
-        color: rgba(255, 255, 255, 0.95);
-        font-size: 13px;
-        line-height: 1.4;
-        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-        word-wrap: break-word;
-        word-break: break-word;
-        white-space: pre-wrap;
-        overflow-wrap: break-word;
-        max-width: 100%;
-        display: block;
-      }
+
       .chat-input {
-        padding: 16px 20px;
-        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 14px 18px;
+        border-top: 1px solid var(--glass-border);
         -webkit-app-region: no-drag;
-        background: rgba(0, 0, 0, 0.2);
-        backdrop-filter: blur(10px);
+        background: rgba(0, 0, 0, 0.15);
         flex-shrink: 0;
       }
-      .recording-indicator {
-        display: none;
-        align-items: center;
-        gap: 6px;
-        background: rgba(244, 67, 54, 0.15);
-        border: 1px solid rgba(244, 67, 54, 0.3);
-        padding: 4px 10px;
-        border-radius: 12px;
-        font-size: 11px;
-        color: #ff5252;
-      }
+
       .batch-badge {
         display: none;
         align-items: center;
         gap: 4px;
-        background: rgba(33, 150, 243, 0.15);
-        border: 1px solid rgba(33, 150, 243, 0.3);
-        padding: 4px 8px;
-        border-radius: 6px;
+        background: var(--info-soft);
+        border: 1px solid rgba(56, 189, 248, 0.25);
+        padding: 5px 10px;
+        border-radius: var(--radius-pill);
         font-size: 11px;
-        color: #64b5f6;
+        color: var(--info);
         font-weight: 600;
-        cursor: default;
-        user-select: none;
         -webkit-app-region: no-drag;
       }
+
+      .send-button, .mic-button {
+        padding: 8px 12px;
+        cursor: default;
+        -webkit-app-region: no-drag;
+      }
+
       .input-container {
         display: flex;
         align-items: center;
-        gap: 12px;
-        background: rgba(255, 255, 255, 0.1);
-        border-radius: 8px;
-        padding: 8px 12px;
-        border: 1px solid rgba(255, 255, 255, 0.15);
+        gap: 10px;
         -webkit-app-region: no-drag;
       }
+
       .input-field {
         flex: 1;
-        background: transparent;
-        border: none;
-        color: rgba(255, 255, 255, 0.95);
-        font-size: 13px;
-        outline: none;
-        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-        /* make it work well as multiline */
         resize: none;
-        line-height: 1.4;
+        line-height: 1.5;
         min-height: 32px;
         max-height: 140px;
         overflow-y: auto;
       }
-      .input-field:focus {
-        outline: none;
-      }
-      .input-field::placeholder {
-        color: rgba(255, 255, 255, 0.5);
-      }
-      .send-button {
-        background: rgba(255, 255, 255, 0.15);
-        border: none;
-        border-radius: 6px;
-        padding: 6px 10px;
-        color: rgba(255, 255, 255, 0.9);
-        cursor: default;
-        transition: all 0.2s;
-        -webkit-app-region: no-drag;
-      }
-      .send-button:hover {
-        background: rgba(255, 255, 255, 0.25);
-        color: rgba(255, 255, 255, 1);
-      }
+
+      .input-field:focus { outline: none; }
+
       .status-message {
         text-align: center;
-        color: rgba(255, 255, 255, 0.7);
+        color: var(--text-muted);
         font-size: 12px;
         padding: 20px;
         font-style: italic;
-        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
       }
+
       .error-message {
-        color: #ff4757;
+        color: var(--danger);
         font-size: 12px;
         padding: 10px;
         text-align: center;
-        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
       }
-      .mic-button {
-        background: rgba(255, 255, 255, 0.15);
-        border: none;
-        border-radius: 6px;
-        padding: 6px 10px;
-        color: rgba(255, 255, 255, 0.9);
-        cursor: default;
-        transition: all 0.2s;
-        -webkit-app-region: no-drag;
-      }
-      .mic-button:hover {
-        background: rgba(255, 255, 255, 0.25);
-        color: rgba(255, 255, 255, 1);
-      }
-      .mic-button.recording {
-        background: rgba(255, 71, 87, 0.8);
-        color: white;
-        box-shadow: 0 0 15px rgba(255, 71, 87, 0.4);
-      }
-      .help-text {
-        color: rgba(255, 255, 255, 0.7);
-        font-size: 11px;
-        text-align: center;
-        padding: 10px;
-        line-height: 1.4;
-        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-      }
-      .interaction-indicator {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: rgba(0, 0, 0, 0.8);
-        color: rgba(255, 255, 255, 0.9);
-        padding: 8px 16px;
-        border-radius: 6px;
-        font-size: 12px;
-        font-weight: 500;
-        opacity: 0;
-        transition: opacity 0.3s ease;
-        pointer-events: none;
-        z-index: 1000;
-      }
-      .interaction-indicator.show {
-        opacity: 1;
-      }
-      .interaction-indicator.interactive {
-        background: rgba(76, 175, 80, 0.9);
-      }
-      .interaction-indicator.non-interactive {
-        background: rgba(244, 67, 54, 0.9);
-      }
+
       .non-interactive .input-container {
         pointer-events: none;
         opacity: 0;
       }
       .non-interactive .icon-button {
         display: none;
-      }
-
-      /* Minimalist Listening Animation */
-      .listening-indicator {
-        display: none;
-        position: fixed;
-        top: 60px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(203, 203, 203, 0.3);
-        border-radius: 20px;
-        padding: 8px 16px;
-        z-index: 1000;
-        pointer-events: none;
-      }
-
-      .listening-indicator.active {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        animation: fadeInUp 0.3s ease-out;
-      }
-
-      @keyframes fadeInUp {
-        from {
-          opacity: 0;
-          transform: translateX(-50%) translateY(10px);
-        }
-        to {
-          opacity: 1;
-          transform: translateX(-50%) translateY(0);
-        }
-      }
-
-      .listening-wave {
-        display: flex;
-        align-items: center;
-        gap: 2px;
-      }
-
-      .wave-bar {
-        width: 2px;
-        background: #4caf50;
-        border-radius: 1px;
-        animation: waveAnimation 1.2s infinite ease-in-out;
-      }
-
-      .wave-bar:nth-child(1) {
-        height: 8px;
-        animation-delay: 0s;
-      }
-      .wave-bar:nth-child(2) {
-        height: 12px;
-        animation-delay: 0.15s;
-      }
-      .wave-bar:nth-child(3) {
-        height: 16px;
-        animation-delay: 0.3s;
-      }
-      .wave-bar:nth-child(4) {
-        height: 12px;
-        animation-delay: 0.45s;
-      }
-      .wave-bar:nth-child(5) {
-        height: 8px;
-        animation-delay: 0.6s;
-      }
-
-      @keyframes waveAnimation {
-        0%, 100% {
-          transform: scaleY(0.3);
-          opacity: 0.6;
-        }
-        50% {
-          transform: scaleY(1);
-          opacity: 1;
-        }
-      }
-
-      .listening-text {
-        color: rgba(255, 255, 255, 0.9);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.5px;
-      }
-
-      .listening-duration {
-        color: rgba(76, 175, 80, 0.8);
-        font-size: 10px;
-        font-family: monospace;
-        margin-left: 4px;
-      }
-
-      /* Interim text overlay */
-      .interim-overlay {
-        position: fixed;
-        bottom: 80px;
-        left: 20px;
-        right: 20px;
-        background: rgba(0, 0, 0, 0.028);
-        backdrop-filter: blur(15px);
-        border: 1px solid rgba(76, 175, 80, 0.3);
-        border-radius: 8px;
-        padding: 12px;
-        color: rgba(255, 255, 255, 0.8);
-        font-size: 12px;
-        font-style: italic;
-        z-index: 999;
-        pointer-events: none;
-        display: none;
-        animation: slideUpFade 0.3s ease-out;
-      }
-
-      .interim-overlay.active {
-        display: block;
-      }
-
-      @keyframes slideUpFade {
-        from {
-          opacity: 0;
-          transform: translateY(10px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
-
-      /* Custom dropdown to avoid native OS select (which leaks through setContentProtection) */
-      .custom-dropdown {
-        position: relative;
-        display: inline-block;
-        margin-right: 8px;
-        -webkit-app-region: no-drag;
-      }
-      .custom-dropdown-btn {
-        background: rgba(255, 255, 255, 0.1);
-        color: rgba(255, 255, 255, 0.8);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 4px;
-        padding: 4px 8px;
-        font-size: 12px;
-        outline: none;
-        cursor: default;
-        font-family: inherit;
-        transition: all 0.2s ease;
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        user-select: none;
-      }
-      .custom-dropdown-btn:hover {
-        background: rgba(255, 255, 255, 0.15);
-      }
-      .custom-dropdown-btn .arrow {
-        font-size: 8px;
-        transition: transform 0.2s ease;
-      }
-      .custom-dropdown.open .custom-dropdown-btn .arrow {
-        transform: rotate(180deg);
-      }
-      .custom-dropdown-menu {
-        display: none;
-        position: absolute;
-        top: 100%;
-        left: 0;
-        margin-top: 2px;
-        background: rgba(30, 30, 30, 0.95);
-        backdrop-filter: blur(15px);
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        border-radius: 6px;
-        min-width: 130px;
-        z-index: 9999;
-        overflow: hidden;
-        box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-      }
-      .custom-dropdown.open .custom-dropdown-menu {
-        display: block;
-        animation: dropIn 0.15s ease-out;
-      }
-      @keyframes dropIn {
-        from { opacity: 0; transform: translateY(-4px); }
-        to { opacity: 1; transform: translateY(0); }
-      }
-      .custom-dropdown-item {
-        padding: 6px 12px;
-        font-size: 12px;
-        color: rgba(255,255,255,0.8);
-        cursor: default;
-        transition: background 0.15s ease;
-      }
-      .custom-dropdown-item:hover {
-        background: rgba(255,255,255,0.1);
-      }
-      .custom-dropdown-item.selected {
-        background: rgba(33, 150, 243, 0.3);
-        color: #fff;
-      }
-      .non-interactive .custom-dropdown {
-        display: none;
-      }
-
-      /* Shortcut Help Overlay */
-      .shortcut-overlay {
-        display: none;
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0, 0, 0, 0.85);
-        backdrop-filter: blur(20px);
-        z-index: 10000;
-        justify-content: center;
-        align-items: center;
-        -webkit-app-region: no-drag;
-      }
-      .shortcut-overlay.visible {
-        display: flex;
-        animation: fadeIn 0.2s ease-out;
-      }
-      @keyframes fadeIn {
-        from { opacity: 0; }
-        to { opacity: 1; }
-      }
-      .shortcut-card {
-        background: rgba(30, 30, 30, 0.95);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 12px;
-        padding: 24px 28px;
-        max-width: 380px;
-        width: 90%;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-      }
-      .shortcut-card h2 {
-        margin: 0 0 16px 0;
-        font-size: 15px;
-        font-weight: 600;
-        color: rgba(255, 255, 255, 0.95);
-        text-align: center;
-      }
-      .shortcut-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 6px 0;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-      }
-      .shortcut-row:last-child {
-        border-bottom: none;
-      }
-      .shortcut-label {
-        font-size: 12px;
-        color: rgba(255, 255, 255, 0.7);
-      }
-      .shortcut-key {
-        font-size: 11px;
-        color: rgba(255, 255, 255, 0.9);
-        background: rgba(255, 255, 255, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 4px;
-        padding: 2px 8px;
-        font-family: monospace;
-      }
-      .shortcut-mode-indicator {
-        text-align: center;
-        margin-top: 12px;
-        padding-top: 12px;
-        border-top: 1px solid rgba(255, 255, 255, 0.1);
-        font-size: 11px;
-        color: rgba(255, 255, 255, 0.5);
-      }
-      .shortcut-mode-indicator span {
-        color: #64b5f6;
-        font-weight: 600;
       }
     </style>
   </head>
@@ -1150,6 +499,25 @@
         saveHistory();
         // Clear DOM
         if (chatMessages) chatMessages.innerHTML = '';
+        focusChatInput();
+      }
+
+      function focusChatInput() {
+        if (chatContainer) chatContainer.classList.remove('non-interactive');
+        isInteractive = true;
+        if (messageInput) {
+          setTimeout(() => messageInput.focus(), 50);
+        }
+      }
+
+      function applyInteractionMode(interactive) {
+        isInteractive = !!interactive;
+        if (chatContainer) {
+          chatContainer.classList.toggle('non-interactive', !isInteractive);
+        }
+        if (isInteractive) {
+          focusChatInput();
+        }
       }
 
       function applyMicVisibility() {
@@ -1194,7 +562,29 @@
       if (whysperAPI && whysperAPI.onSessionCleared) {
         whysperAPI.onSessionCleared(() => {
           clearChatHistory(true);
+          addMessage('Session memory has been cleared', 'system');
+          focusChatInput();
         });
+      }
+
+      if (window.electronAPI?.onInteractionModeChanged) {
+        window.electronAPI.onInteractionModeChanged((event, interactive) => {
+          applyInteractionMode(interactive);
+        });
+      }
+
+      if (window.electronAPI?.onChatFocusInput) {
+        window.electronAPI.onChatFocusInput(() => {
+          focusChatInput();
+        });
+      }
+
+      if (window.electronAPI?.getWindowStats) {
+        window.electronAPI.getWindowStats().then((stats) => {
+          if (stats && typeof stats.isInteractive === 'boolean') {
+            applyInteractionMode(stats.isInteractive);
+          }
+        }).catch(() => {});
       }
 
       // Initialize availability and history
@@ -1581,10 +971,6 @@
 
         whysperAPI.onRecordingStopped(() => {
           handleRecordingStopped();
-        });
-
-        whysperAPI.onSessionCleared(() => {
-          addMessage('Session memory has been cleared', 'system');
         });
 
         // Replace transcription LLM handler to store text + snippets

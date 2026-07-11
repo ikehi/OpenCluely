@@ -29,6 +29,7 @@ class MainWindowUI {
     async init() {
         try {
             this.setupElements();
+            this.setupCommandBarDrag();
             this.setupEventListeners();
             
             // Load current skill from settings
@@ -263,20 +264,9 @@ class MainWindowUI {
         this.infoButton = document.getElementById('infoButton');
         this.shortcutsPopover = document.getElementById('shortcutsPopover');
 
-        // NEW: Screenshot button is the first .command-item without id
-        const commandItems = document.querySelectorAll('.command-item');
-        this.screenshotButton = commandItems && commandItems[0];
-
-        if (!this.statusDot || !this.skillIndicator || !this.micButton || !this.screenshotButton) {
+        if (!this.statusDot || !this.skillIndicator || !this.micButton) {
             throw new Error('Required UI elements not found');
         }
-
-        // Screenshot click handler
-        this.screenshotButton.addEventListener('click', () => {
-            if (this.isInteractive && window.electronAPI && window.electronAPI.takeScreenshot) {
-                window.electronAPI.takeScreenshot();
-            }
-        });
 
         // Skill indicator click handler toggles DSA skill
         this.skillIndicator.addEventListener('click', () => {
@@ -351,44 +341,6 @@ class MainWindowUI {
             });
         }
 
-        // Language dropdown
-        this.languageSelect = document.getElementById('codingLanguage');
-        if (this.languageSelect) {
-            // Set default to C++ if no value is set
-            this.languageSelect.value = 'cpp';
-            
-            // Initialize with current setting
-            if (window.electronAPI && window.electronAPI.getSettings) {
-                window.electronAPI.getSettings().then(settings => {
-                    if (settings && settings.codingLanguage) {
-                        this.languageSelect.value = settings.codingLanguage;
-                    } else {
-                        // Save C++ as default if no language is set
-                        this.languageSelect.value = 'cpp';
-                        window.electronAPI.saveSettings({ codingLanguage: 'cpp' });
-                    }
-                }).catch(() => {
-                    // Fallback to C++ on error
-                    this.languageSelect.value = 'cpp';
-                });
-            }
-
-            this.languageSelect.addEventListener('change', (e) => {
-                const lang = e.target.value;
-                if (window.electronAPI && window.electronAPI.saveSettings) {
-                    window.electronAPI.saveSettings({ codingLanguage: lang });
-                }
-                // Resize for any width change
-                setTimeout(() => {
-                    const commandTab = document.querySelector('.command-tab');
-                    if (commandTab && window.electronAPI && window.electronAPI.resizeWindow) {
-                        const rect = commandTab.getBoundingClientRect();
-                        window.electronAPI.resizeWindow(Math.ceil(rect.width), Math.ceil(rect.height));
-                    }
-                }, 50);
-            });
-        }
-
         // Info button / shortcuts popover
         if (this.infoButton && this.shortcutsPopover) {
             this.infoButton.addEventListener('click', (e) => {
@@ -431,6 +383,63 @@ class MainWindowUI {
                 }
             });
         }
+    }
+
+    setupCommandBarDrag() {
+        const commandTab = document.querySelector('.command-tab');
+        if (!commandTab || !window.electronAPI?.moveWindow) return;
+
+        let dragging = false;
+        let suppressClick = false;
+        let startX = 0;
+        let startY = 0;
+        let lastX = 0;
+        let lastY = 0;
+
+        const onMouseMove = (e) => {
+            const totalDx = e.screenX - startX;
+            const totalDy = e.screenY - startY;
+            if (!dragging && (Math.abs(totalDx) > 4 || Math.abs(totalDy) > 4)) {
+                dragging = true;
+            }
+            if (!dragging) return;
+
+            const dx = e.screenX - lastX;
+            const dy = e.screenY - lastY;
+            lastX = e.screenX;
+            lastY = e.screenY;
+            if (dx !== 0 || dy !== 0) {
+                window.electronAPI.moveWindow(dx, dy);
+            }
+        };
+
+        const onMouseUp = () => {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            if (dragging) {
+                suppressClick = true;
+                setTimeout(() => { suppressClick = false; }, 0);
+            }
+            dragging = false;
+        };
+
+        commandTab.addEventListener('mousedown', (e) => {
+            if (e.button !== 0 || !this.isInteractive) return;
+            dragging = false;
+            startX = e.screenX;
+            startY = e.screenY;
+            lastX = e.screenX;
+            lastY = e.screenY;
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        });
+
+        commandTab.addEventListener('click', (e) => {
+            if (suppressClick) {
+                e.stopPropagation();
+                e.preventDefault();
+            }
+        }, true);
     }
 
     setupEventListeners() {
