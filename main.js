@@ -38,6 +38,8 @@ class ApplicationController {
   this.codingLanguage = "auto";
     this.speechAvailable = false;
     this.screenshotQueue = [];
+    this.screenshotJobCounter = 0;
+    this.screenshotProcessingChain = Promise.resolve();
 
     // Window configurations for reference
     this.windowConfigs = {
@@ -853,6 +855,15 @@ class ApplicationController {
       return;
     }
 
+    const responseId = `img-${Date.now()}-${++this.screenshotJobCounter}`;
+    this.screenshotProcessingChain = this.screenshotProcessingChain
+      .catch(() => {})
+      .then(() => this.executeScreenshotOCR(responseId));
+
+    return this.screenshotProcessingChain;
+  }
+
+  async executeScreenshotOCR(responseId) {
     const startTime = Date.now();
 
     try {
@@ -864,8 +875,8 @@ class ApplicationController {
         }
       });
 
-      // Small delay for OS to process the hides and destroy floating native dropdowns
-      await new Promise(resolve => setTimeout(resolve, 150));
+      // Small delay for OS to process hides and destroy floating native dropdowns
+      await new Promise(resolve => setTimeout(resolve, 400));
 
       const capture = await captureService.captureAndProcess();
 
@@ -916,19 +927,17 @@ class ApplicationController {
         windowManager.showOnCurrentDesktop(chatWin);
       }
 
-      windowManager.broadcastToAllWindows('llm-response', {
-        response: llmResult.response,
-        skill: this.activeSkill,
+      this.broadcastLLMSuccess(llmResult, {
+        responseId,
+        isImageAnalysis: true,
         processingTime: llmResult.metadata.processingTime,
-        usedFallback: llmResult.metadata.usedFallback,
-        isImageAnalysis: true
+        usedFallback: llmResult.metadata.usedFallback
       });
-
-      this.broadcastLLMSuccess(llmResult);
     } catch (error) {
       logger.error("Screenshot OCR process failed", {
         error: error.message,
         duration: Date.now() - startTime,
+        responseId
       });
 
       windowManager.hideLLMResponse();
@@ -969,7 +978,7 @@ class ApplicationController {
       });
 
       // Small delay for OS
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await new Promise(resolve => setTimeout(resolve, 400));
 
       const capture = await captureService.captureAndProcess();
 
@@ -1024,6 +1033,15 @@ class ApplicationController {
       count: 0
     });
 
+    const responseId = `batch-${Date.now()}-${++this.screenshotJobCounter}`;
+    this.screenshotProcessingChain = this.screenshotProcessingChain
+      .catch(() => {})
+      .then(() => this.executeBatchScreenshots(processingQueue, batchSize, responseId, startTime));
+
+    return this.screenshotProcessingChain;
+  }
+
+  async executeBatchScreenshots(processingQueue, batchSize, responseId, startTime) {
     try {
       windowManager.showLLMLoading();
 
@@ -1058,19 +1076,18 @@ class ApplicationController {
         windowManager.showOnCurrentDesktop(chatWin);
       }
 
-      windowManager.broadcastToAllWindows('llm-response', {
-        response: llmResult.response,
-        skill: this.activeSkill,
+      this.broadcastLLMSuccess(llmResult, {
+        responseId,
+        isImageAnalysis: true,
+        batchSize,
         processingTime: llmResult.metadata.processingTime,
-        usedFallback: llmResult.metadata.usedFallback,
-        isImageAnalysis: true
+        usedFallback: llmResult.metadata.usedFallback
       });
-
-      this.broadcastLLMSuccess(llmResult);
     } catch (error) {
       logger.error("Batch screenshot OCR process failed", {
         error: error.message,
         duration: Date.now() - startTime,
+        responseId
       });
 
       windowManager.hideLLMResponse();
@@ -1259,16 +1276,18 @@ class ApplicationController {
     });
   }
 
-  broadcastLLMSuccess(llmResult) {
+  broadcastLLMSuccess(llmResult, extras = {}) {
     const broadcastData = {
       response: llmResult.response,
       metadata: llmResult.metadata,
-      skill: this.activeSkill, // Add the current active skill to the top level
+      skill: this.activeSkill,
+      ...extras
     };
 
     logger.info("Broadcasting LLM success to all windows", {
       responseLength: llmResult.response.length,
       skill: this.activeSkill,
+      responseId: extras.responseId || null,
       dataKeys: Object.keys(broadcastData),
       responsePreview: llmResult.response.substring(0, 100) + "...",
     });

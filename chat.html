@@ -1094,8 +1094,10 @@
       // Chat persistence and deduplication
       const CHAT_HISTORY_KEY = 'opencluely_chat_history_v1';
       let chatHistory = [];
-      const recentResponseHashes = new Set();
-      const RECENT_HASH_LIMIT = 50;
+      const recentResponseIds = new Set();
+      const recentContentDupes = new Map();
+      const RECENT_ID_LIMIT = 100;
+      const CONTENT_DUPE_MS = 600;
 
       function hashString(str) {
         try {
@@ -1181,7 +1183,9 @@
         whysperAPI.onLlmResponse((event, data) => {
           try { hideThinkingIndicator(); } catch (_) {}
           if (data && data.response) {
-            renderAssistantResponse(data.response);
+            renderAssistantResponse(data.response, {
+              responseId: data.responseId || (data.metadata && data.metadata.responseId) || null
+            });
           }
         });
       }
@@ -1481,20 +1485,34 @@
         }
         return messageDiv;
       }
-      function renderAssistantResponse(response) {
+      function renderAssistantResponse(response, meta = {}) {
         if (!response || typeof response !== 'string') return;
-        // Deduplication: avoid processing the same response twice
+
         const normalized = response.trim();
-        const h = hashString(normalized);
-        if (recentResponseHashes.has(h)) return;
-        recentResponseHashes.add(h);
-        if (recentResponseHashes.size > RECENT_HASH_LIMIT) {
-          const first = recentResponseHashes.values().next().value;
-          recentResponseHashes.delete(first);
+        const responseId = meta.responseId || null;
+
+        if (responseId) {
+          if (recentResponseIds.has(responseId)) return;
+          recentResponseIds.add(responseId);
+          if (recentResponseIds.size > RECENT_ID_LIMIT) {
+            const first = recentResponseIds.values().next().value;
+            recentResponseIds.delete(first);
+          }
+        } else {
+          const h = hashString(normalized);
+          const now = Date.now();
+          const lastSeen = recentContentDupes.get(h);
+          if (lastSeen && now - lastSeen < CONTENT_DUPE_MS) return;
+          recentContentDupes.set(h, now);
+          if (recentContentDupes.size > RECENT_ID_LIMIT) {
+            const oldest = recentContentDupes.keys().next().value;
+            recentContentDupes.delete(oldest);
+          }
         }
 
         const blocks = extractCodeBlocks(response);
         const textOnly = stripCodeBlocks(response, blocks);
+        let firstElement = null;
 
         // Add text response if available
         if (textOnly && textOnly.trim().length) {
@@ -1573,7 +1591,9 @@
         whysperAPI.onTranscriptionLlmResponse((event, data) => {
           if (data && data.response) {
             try { hideThinkingIndicator(); } catch (_) {}
-            renderAssistantResponse(data.response);
+            renderAssistantResponse(data.response, {
+              responseId: data.responseId || (data.metadata && data.metadata.responseId) || null
+            });
           }
         });
       }

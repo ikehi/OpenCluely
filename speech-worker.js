@@ -93,34 +93,61 @@ async function runRecordingLoop() {
       if (fs.existsSync(tempWavPath)) {
         const stats = fs.statSync(tempWavPath);
         if (stats.size > 2000) { // Check if it's not basically empty (WAV headers are ~44 bytes)
-          log('debug', 'Uploading audio to Groq Whisper...', { size: stats.size });
+          log('debug', 'Uploading audio to Groq Whisper...', { size: stats.size, keyCount: groqClients.length });
 
           process.send({ type: 'interim-transcription', text: 'Transcribing...' });
 
-          const transcription = await groqClients[currentClientIndex].audio.transcriptions.create({
-            file: fs.createReadStream(tempWavPath),
-            model: 'whisper-large-v3-turbo',
-            response_format: 'text',
-            language: 'en'
-          });
+          let transcription = null;
+          let lastTranscriptionError = null;
+
+          for (let attempt = 0; attempt < groqClients.length; attempt++) {
+            const keyIndex = (currentClientIndex + attempt) % groqClients.length;
+            try {
+              transcription = await groqClients[keyIndex].audio.transcriptions.create({
+                file: fs.createReadStream(tempWavPath),
+                model: 'whisper-large-v3-turbo',
+                response_format: 'text',
+                language: 'en'
+              });
+              currentClientIndex = keyIndex;
+              break;
+            } catch (err) {
+              lastTranscriptionError = err;
+              const retryable = err.status === 429 ||
+                err.status === 401 ||
+                err.status === 403 ||
+                (err.status && err.status >= 500) ||
+                (err.message && /fetch failed|network|timeout|rate limit/i.test(err.message));
+
+              log('warn', `Whisper failed on API key index ${keyIndex}`, {
+                error: err.message,
+                status: err.status,
+                attempt: attempt + 1,
+                totalKeys: groqClients.length,
+                willRetry: retryable && attempt < groqClients.length - 1
+              });
+
+              if (!retryable || attempt === groqClients.length - 1) {
+                break;
+              }
+            }
+          }
 
           if (transcription && transcription.trim().length > 0) {
             const dur = Date.now() - sessionStartTime;
             log('info', 'Final transcription', { text: transcription.trim(), sessionDuration: `${dur}ms` });
             process.send({ type: 'transcription', text: transcription.trim() });
+          } else if (lastTranscriptionError) {
+            throw lastTranscriptionError;
           }
         }
       }
     } catch (err) {
-      log('error', 'Groq transcription failed', { error: err.message });
-
-      // If we hit a rate limit, rotate to the next key automatically
-      if (err.status === 429 || (err.message && err.message.includes('429'))) {
-        currentClientIndex = (currentClientIndex + 1) % groqClients.length;
-        log('warn', `Rate limit hit! Rotating to API Key Index ${currentClientIndex}`);
-      }
-
-      // We don't stop recording on API error, we just keep looping unless it's fatal
+      log('error', 'Groq transcription failed across API keys', {
+        error: err.message,
+        status: err.status,
+        keyCount: groqClients.length
+      });
     }
 
     // Loop!
