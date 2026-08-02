@@ -1626,9 +1626,14 @@ ${extractedText}`,
       const messages = this.buildIntelligentTranscriptionRequest(text, activeSkill, sessionMemory, programmingLanguage);
       const responseText = await this.executeRequestWithFallback(messages, false, activeSkill);
 
-      const finalResponse = programmingLanguage
-        ? this.enforceProgrammingLanguage(responseText, programmingLanguage)
+      const codingSkills = ['dsa', 'programming'];
+      const humanizedResponse = !codingSkills.includes(activeSkill)
+        ? this.applyHumanizerFixes(responseText)
         : responseText;
+
+      const finalResponse = programmingLanguage
+        ? this.enforceProgrammingLanguage(humanizedResponse, programmingLanguage)
+        : humanizedResponse;
 
       return {
         response: finalResponse,
@@ -1818,21 +1823,124 @@ ${extractedText}`,
     return messages;
   }
 
+  /**
+   * Port of copy_scan.py (humanizer-stack) to JavaScript.
+   * Applies deterministic, zero-latency surface fixes to any LLM response.
+   * No second LLM call. Pure string operations.
+   */
+  applyHumanizerFixes(text) {
+    if (!text || typeof text !== 'string') return text;
+
+    let result = text;
+
+    // 1. Em dash fix — replace " — " or "word—word" with ", " or ", "
+    // Pattern from copy_scan.py: copy-em-dash  (\w\s*—\s*\w)
+    result = result.replace(/(\w)\s*—\s*(\w)/g, (_, before, after) => `${before}, ${after}`);
+    result = result.replace(/(\w)\s*—\s*/g, (_, before) => `${before}, `);
+    result = result.replace(/\s*—\s*(\w)/g, (_, after) => `, ${after}`);
+    result = result.replace(/—/g, ','); // catch any remaining em dashes
+
+    // 2. Antithesis / negative parallelism fix — copy-antithesis
+    // "it's not just X, it's Y" → strip the negation preamble, keep "it's Y"
+    result = result.replace(
+      /(?:it'?s |it |that'?s )?not just[^.,;!?]{1,40},?\s*(it'?s|but)\s*/gi,
+      '$1 '
+    );
+    result = result.replace(/\bnot only\b([^.,;!?]{1,40}),?\s*but\b/gi, '$1 and');
+
+    // 3. Hype / marketing cliche words — from copy_scan.py hype-copy
+    const hypePhrases = [
+      [/\bTransform your\b/gi, 'Improve your'],
+      [/\bSupercharge\b/gi, 'Improve'],
+      [/\bUnleash\b/gi, 'Use'],
+      [/\bEffortlessly\b/gi, 'Easily'],
+      [/\breimagined\b/gi, 'redesigned'],
+      [/\bGame-?changer\b/gi, 'big improvement'],
+      [/\bdelve\b/gi, 'get into'],
+      [/\bdive into the details\b/gi, 'get into it'],
+      [/\bdive into\b/gi, 'get into'],
+      [/\belevate your\b/gi, 'improve your'],
+      [/\bworld-class\b/gi, 'top-tier'],
+      [/\bcutting-edge\b/gi, 'modern'],
+      [/\brevolutionary\b/gi, 'new'],
+      [/\bbest-in-class\b/gi, 'top'],
+      // From humanizer SKILL.md banned word list
+      [/\bthrive\b/gi, 'do well'],
+      [/\bpivotal\b/gi, 'important'],
+      [/\brobust\b/gi, 'solid'],
+      [/\bleverage\b/gi, 'use'],
+      [/\bseamless\b/gi, 'smooth'],
+      [/\bmultifaceted\b/gi, 'complex'],
+    ];
+    for (const [pat, replacement] of hypePhrases) {
+      result = result.replace(pat, replacement);
+    }
+
+    // 4. Servile openers — copy-servile
+    result = result.replace(/^(Great question[!.]*\s*)/i, '');
+    result = result.replace(/^(I hope this helps[!.]*\s*)/i, '');
+    result = result.replace(/^(Certainly[!,]*\s*)/i, '');
+    result = result.replace(/^(Of course[!,]*\s*)/i, '');
+    result = result.replace(/^(Sure thing[!,]*\s*)/i, '');
+    result = result.replace(/^(Happy to (?:help|assist|answer|explain)[!,]*\s*)/i, '');
+    result = result.replace(/^(Absolutely[!,]*\s*)/i, '');
+    result = result.replace(/^(Great[!,]\s*)/i, '');
+    // Inline servile phrases at the start of answers
+    result = result.replace(/^((?:Sure thing|Happy to)[^.!?]{0,40},\s*)/i, '');
+
+    // 5. Tidy closer patterns — from structural_scan.py TIDY_CLOSER + observed failures
+    // These appear as the LAST sentence. Remove them.
+    const tidyCloserPats = [
+      /[.!]?\s*(?:Ultimately|In the end|At the end of the day)[^.!?]*[.!?]\s*$/i,
+      /[.!]?\s*(?:The skill sets? overlap[^.!?]*)[.!?]\s*$/i,
+      /[.!]?\s*(?:The focus was on[^.!?]*)[.!?]\s*$/i,
+      /[.!]?\s*(?:Overall[,]? (?:my|our|the)[^.!?]*)[.!?]\s*$/i,
+      /[.!]?\s*(?:That(?:'s| is) the main difference)[.!?]\s*$/i,
+      /[.!]?\s*(?:That(?:'s| is) what (?:I|we) (?:always?|really) (?:keep|kept)[^.!?]*)[.!?]\s*$/i,
+      // Observed failures batch 1:
+      /[.!]?\s*It was a mix of[^.!?]*[.!?]\s*$/i,
+      /[.!]?\s*So while (?:my|our|the)[^.!?]*[.!?]\s*$/i,
+      /[.!]?\s*I'm (?:ready|excited|happy) to (?:dive|jump|start)[^.!?]*[.!?]\s*$/i,
+      /[.!]?\s*That'?s? (?:the|my) main (?:focus|goal|priority|approach)[^.!?]*[.!?]\s*$/i,
+      /[.!]?\s*(?:That|This) (?:contrast|difference|distinction) always[^.!?]*[.!?]\s*$/i,
+      /[.!]?\s*I thrive on[^.!?]*[.!?]\s*$/i,
+      // Observed failures batch 2:
+      /[.!]?\s*(?:So )?the focus shifts from[^.!?]*[.!?]\s*$/i,
+      /[.!]?\s*I'm ready to start (?:immediately|right away)[^.!?]*[.!?]\s*$/i,
+      /[.!]?\s*(?:I|we) do well in[^.!?]*[.!?]\s*$/i,
+      /[.!]?\s*keeping the (?:design|process|work|project)[^.!?]*(?:track|path|schedule)[^.!?]*[.!?]\s*$/i,
+    ];
+    for (const pat of tidyCloserPats) {
+      result = result.replace(pat, '');
+    }
+
+    // 6. Oxford comma Rule of Three reducer — trim "X, Y, and Z" to "X and Y"
+    // Only applies to short noun/verb phrase lists (under 60 chars total for safety)
+    // Pattern: word/phrase COMMA word/phrase COMMA "and" word/phrase
+    result = result.replace(
+      /([^,\n]{3,30}),\s+([^,\n]{3,30}),\s+and\s+([^,.!?\n]{3,30})/g,
+      (match, a, b, c) => {
+        // Only trim if all three segments are short (likely a flat list, not a complex clause)
+        if (a.length < 35 && b.length < 35 && c.length < 35) {
+          return `${a} and ${b}`;
+        }
+        return match; // leave complex sentences alone
+      }
+    );
+
+    return result.trim();
+  }
+
   getHumanizedBasicQuestionPrompt(mode, documentContext = null) {
-    let prompt = `You sound like a sharp, real person in a live conversation — not an AI assistant, not a textbook, not a corporate FAQ.
+    let prompt = `You are a real person in a live interview conversation. Speak naturally and directly.
 
-HOW TO SOUND HUMAN:
-- Write the way people actually talk. Use contractions: I'm, it's, don't, wouldn't, kinda, basically.
-- Never open with robotic phrases like "Certainly!", "Great question!", "I'd be happy to help", or "The answer is as follows".
-- Mix short punchy lines with longer ones. Real speech has rhythm, not perfect symmetry.
-- Light casual phrasing is good when it fits: "pretty much", "honestly", "from what I know", "what I'd say is".
-- Use first person naturally when it helps — "I'd probably go with..." sounds human; "One should consider..." sounds like AI.
-- One or two casual connectors per answer is enough: "so yeah", "the thing is", "what stands out to me".
-- Avoid AI tells entirely: no "Furthermore", "Additionally", "It's worth noting", "In conclusion", "delve", "landscape", "leverage", "multifaceted", "comprehensive", "robust".
-
-STAY FACTUALLY CORRECT:
-- Natural tone never means guessing. Every claim must be accurate.
-- If you're genuinely unsure, say so briefly in a human way — don't invent details.
+HOW TO SPEAK:
+- Use contractions naturally: I'm, it's, don't, I've.
+- React to what you're saying — don't just report facts. Occasionally add a personal note: "honestly that part was tricky", "I didn't expect that to matter as much", "that's what kept me there".
+- Don't end answers with a summary of yourself or a conclusion sentence. Just stop when the last fact is stated.
+- Use specific names, numbers, and products. Name the actual software, the actual metric.
+- Never open with "Certainly!", "Great question!", or "I'd be happy to help".
+- Don't perform emotion through the body. Say the feeling plainly.
 
 FORMAT RULES:`;
 
@@ -1873,7 +1981,27 @@ FORMAT RULES:`;
     }
 
     const humanizedPrompt = this.getHumanizedBasicQuestionPrompt(mode, documentContext);
-    return `You're listening to a live conversation. The audio includes both an interviewer and an interviewee — ONLY answer the interviewer's question. Ignore anything the interviewee said.\n\n${humanizedPrompt}`;
+
+    // Extract the candidate's name from the document context for an explicit identity anchor
+    let nameInstruction = 'IDENTITY: You are the candidate in this interview. You do NOT have a name like "ChatGPT" or "AI". If asked your name and no reference document is loaded, deflect naturally (e.g. "You can just call me by my first name — what else can I help with?").';
+    if (documentContext) {
+      const nameMatch = documentContext.match(/(?:name[:\s]+|^)([A-Z][a-z]+(?:\s[A-Z][a-z]+)+)/m);
+      if (nameMatch) {
+        nameInstruction = `IDENTITY: Your name is ${nameMatch[1]}. You are ${nameMatch[1]}, the candidate in this interview. Always use this name when asked who you are.`;
+      } else {
+        nameInstruction = 'IDENTITY: Stay in character as the candidate described in the reference document below. Use their name if asked.';
+      }
+    }
+
+    return `You are in a live mock interview. You are the interviewee. The provided text is the real-time transcription of ONLY the interviewer's voice. Follow these rules strictly:
+1. Act naturally and stay in character at all times.
+2. Respond conversationally to the interviewer's statements and questions.
+3. If the interviewer uses a conversational filler (like "Okay") or says goodbye, provide a natural, brief acknowledgment.
+4. NEVER output your internal thoughts, reasoning, or justification. Output ONLY your spoken dialogue.
+5. Keep your responses concise and do not speak on behalf of the interviewer.
+6. ${nameInstruction}
+
+${humanizedPrompt}`;
   }
 
   formatUserMessage(text, activeSkill) {
