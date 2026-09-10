@@ -7,7 +7,8 @@ class WindowManager {
   constructor() {
     this.windows = new Map();
     this.activeWindow = 'main';
-    this.isInteractive = true; // default to interactive so windows are clickable/drag-able
+    // Default click-through: overlays stay visible but clicks pass through to apps below
+    this.isInteractive = false;
     this.isVisible = false;
     this.currentDisplay = null;
     this.screenWatcher = null;
@@ -97,8 +98,8 @@ class WindowManager {
       this.setupScreenTracking();
       this.setupScreenSharingDetection();
 
-      // Make windows interactive by default so they are not click-through
-      this.setInteractive(true);
+      // Start click-through so overlays can sit over editors without blocking them
+      this.setInteractive(false);
       
       this.isInitialized = true;
       this.isInitializing = false;
@@ -771,6 +772,68 @@ class WindowManager {
       platform: process.platform,
       windowId: win.id,
       isDestroyed: win.isDestroyed()
+    });
+  }
+
+  /**
+   * Restore a window's visibility and always-on-top status WITHOUT stealing
+   * OS focus.  This must be used whenever windows are restored after a
+   * screenshot capture so that the user's browser / editor keeps input focus
+   * and assessment-site blur detectors are never triggered.
+   */
+  showInactiveOnCurrentDesktop(win) {
+    if (!win || win.isDestroyed()) return;
+
+    const llmWin = this.windows.get('llmResponse');
+    const isLLM = llmWin && !llmWin.isDestroyed() && win.id === llmWin.id;
+
+    if (process.platform === 'darwin') {
+      win.hide();
+      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+      const setMacOSAlwaysOnTop = () => {
+        if (win.isDestroyed()) return;
+        try {
+          win.setAlwaysOnTop(true, 'screen-saver', 2);
+        } catch {
+          try { win.setAlwaysOnTop(true, 'pop-up-menu', 2); }
+          catch { try { win.setAlwaysOnTop(true, 'floating', 2); }
+          catch { try { win.setAlwaysOnTop(true, 'screen-saver', 1); } catch(e) { win.setAlwaysOnTop(true); } }}
+        }
+      };
+
+      setMacOSAlwaysOnTop();
+
+      setTimeout(() => {
+        if (win.isDestroyed()) return;
+        win.showInactive();          // <-- no focus steal
+        setMacOSAlwaysOnTop();
+        setTimeout(() => { if (!win.isDestroyed()) setMacOSAlwaysOnTop(); }, 100);
+        setTimeout(() => {
+          if (win.isDestroyed()) return;
+          if (!isLLM) {
+            win.setVisibleOnAllWorkspaces(false);
+          }
+          setMacOSAlwaysOnTop();
+        }, 300);
+      }, 50);
+    } else {
+      // Windows / Linux – show without grabbing focus
+      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      try { win.setAlwaysOnTop(true, 'screen-saver', 1); } catch(e) { win.setAlwaysOnTop(true); }
+      win.showInactive();            // <-- no focus steal
+      setTimeout(() => {
+        if (win.isDestroyed()) return;
+        if (!isLLM) {
+          win.setVisibleOnAllWorkspaces(false);
+        }
+        try { win.setAlwaysOnTop(true, 'screen-saver', 1); } catch(e) { win.setAlwaysOnTop(true); }
+      }, 500);
+    }
+
+    logger.debug('Showing window INACTIVE on current desktop (no focus steal)', {
+      platform: process.platform,
+      windowId: win.id
     });
   }
   

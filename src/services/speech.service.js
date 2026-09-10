@@ -87,11 +87,13 @@ class SpeechService extends EventEmitter {
       // Send init message with credentials and config
       const groqKeyRaw = process.env.GROQ_API_KEY || '';
       const groqKeys = groqKeyRaw.split(',').map(k => k.trim()).filter(k => k);
+      const deepgramKey = process.env.DEEPGRAM_API_KEY || '';
 
       this.worker.send({
         type: 'init',
         config: {
-          groqKeys
+          groqKeys,
+          deepgramKey
         }
       });
 
@@ -149,6 +151,10 @@ class SpeechService extends EventEmitter {
 
       case 'interim-transcription':
         this.emit('interim-transcription', msg.text);
+        break;
+
+      case 'utterance-end':
+        this.emit('utterance-end');
         break;
 
       case 'error':

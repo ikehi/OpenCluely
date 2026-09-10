@@ -3,16 +3,11 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const Groq = require('groq-sdk');
+const WebSocket = require('ws');
 
-let groqClients = [];
-let currentClientIndex = 0;
-let isRecording = false;
-let sessionStartTime = null;
-let recordingProcess = null;
-let available = false;
-let retryCount = 0;
-
+// ---------------------------------------------------------------------------
+// Logging helper – sends structured logs to the parent process
+// ---------------------------------------------------------------------------
 function log(level, message, data) {
   try {
     process.send({ type: 'log', level, message, data: data || {} });
@@ -21,37 +16,231 @@ function log(level, message, data) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let isRecording = false;
+let sessionStartTime = null;
+let recordingProcess = null; // sox child process
+let available = false;
+
+// Deepgram streaming state
+let deepgramApiKey = null;
+let dgSocket = null;
+
+// Groq fallback state
+let groqClients = [];
+let currentClientIndex = 0;
+let useDeepgram = false; // true when DEEPGRAM_API_KEY is present
+
+// ---------------------------------------------------------------------------
+// Initialization
+// ---------------------------------------------------------------------------
 function initialize(config) {
   try {
-    if (!config.groqKeys || config.groqKeys.length === 0) {
-      available = false;
-      process.send({ type: 'init-result', available: false, reason: 'Missing GROQ_API_KEY' });
+    // Check for Deepgram key first (preferred)
+    if (config.deepgramKey && config.deepgramKey.trim().length > 0) {
+      deepgramApiKey = config.deepgramKey.trim();
+      useDeepgram = true;
+      available = true;
+      log('info', 'Deepgram streaming mode enabled', { keyLength: deepgramApiKey.length });
+      process.send({ type: 'init-result', available: true, mode: 'deepgram' });
       return;
     }
 
+    // Fallback to Groq Whisper
+    if (!config.groqKeys || config.groqKeys.length === 0) {
+      available = false;
+      process.send({ type: 'init-result', available: false, reason: 'Missing both DEEPGRAM_API_KEY and GROQ_API_KEY' });
+      return;
+    }
+
+    const Groq = require('groq-sdk');
     groqClients = config.groqKeys.map(key => new Groq({ apiKey: key }));
-
-    // Auto-select Key 2 (index 1) for voice if available, else fallback to index 0
     currentClientIndex = groqClients.length > 1 ? 1 : 0;
-
+    useDeepgram = false;
     available = true;
-    log('info', 'Groq SDK initialized in worker', { keyCount: groqClients.length, startingIndex: currentClientIndex });
-    process.send({ type: 'init-result', available: true });
+    log('info', 'Groq Whisper fallback mode enabled', { keyCount: groqClients.length, startingIndex: currentClientIndex });
+    process.send({ type: 'init-result', available: true, mode: 'groq' });
   } catch (error) {
     available = false;
-    log('error', 'Failed to initialize Groq SDK', { error: error.message });
+    log('error', 'Failed to initialize speech worker', { error: error.message });
     process.send({ type: 'init-result', available: false, reason: error.message });
   }
 }
 
+// ---------------------------------------------------------------------------
+// Cleanup
+// ---------------------------------------------------------------------------
 function cleanup() {
   if (recordingProcess) {
     try { recordingProcess.kill('SIGKILL'); } catch (_) { }
     recordingProcess = null;
   }
+  if (dgSocket) {
+    try {
+      if (dgSocket.readyState === WebSocket.OPEN) {
+        // Send close_stream message to gracefully close
+        dgSocket.send(JSON.stringify({ type: 'CloseStream' }));
+      }
+      dgSocket.close();
+    } catch (_) { }
+    dgSocket = null;
+  }
 }
 
-async function runRecordingLoop() {
+// ===========================================================================
+//  DEEPGRAM STREAMING MODE (raw WebSocket — no SDK wrapper)
+// ===========================================================================
+
+function startDeepgramStreaming() {
+  // Build the Deepgram streaming URL with query parameters
+  const params = new URLSearchParams({
+    model: 'nova-3',
+    language: 'en',
+    encoding: 'linear16',
+    sample_rate: '16000',
+    channels: '1',
+    punctuate: 'true',
+    interim_results: 'true',
+    utterance_end_ms: '1000',
+    vad_events: 'true',
+    smart_format: 'true',
+  });
+
+  const url = `wss://api.deepgram.com/v1/listen?${params.toString()}`;
+
+  log('info', 'Opening Deepgram WebSocket connection...', { url: url.replace(deepgramApiKey, '***') });
+
+  dgSocket = new WebSocket(url, {
+    headers: {
+      Authorization: `Token ${deepgramApiKey}`,
+    },
+  });
+
+  dgSocket.on('open', () => {
+    log('info', 'Deepgram WebSocket connection opened');
+    // Now start sox to capture microphone audio as raw PCM to stdout
+    spawnSoxStreaming();
+  });
+
+  dgSocket.on('message', (raw) => {
+    try {
+      const data = JSON.parse(raw.toString());
+
+      if (data.type === 'Results') {
+        const transcript = data.channel?.alternatives?.[0]?.transcript;
+        if (!transcript || transcript.trim().length === 0) return;
+
+        const isFinal = data.is_final;
+
+        if (isFinal) {
+          const dur = Date.now() - sessionStartTime;
+          log('info', 'Final transcription', { text: transcript.trim(), sessionDuration: `${dur}ms` });
+          process.send({ type: 'transcription', text: transcript.trim() });
+        } else {
+          // Interim result — show real-time words appearing
+          process.send({ type: 'interim-transcription', text: transcript.trim() });
+        }
+      } else if (data.type === 'UtteranceEnd') {
+        log('info', 'Deepgram utterance end detected — speaker finished');
+        process.send({ type: 'utterance-end' });
+      } else if (data.type === 'SpeechStarted') {
+        log('debug', 'Deepgram speech started');
+      } else if (data.type === 'Metadata') {
+        log('debug', 'Deepgram metadata received', { request_id: data.request_id });
+      } else if (data.type === 'Error') {
+        log('error', 'Deepgram returned an error', { message: data.message, description: data.description });
+      }
+    } catch (err) {
+      log('error', 'Error parsing Deepgram message', { error: err.message });
+    }
+  });
+
+  dgSocket.on('error', (error) => {
+    log('error', 'Deepgram WebSocket error', { error: error?.message || String(error) });
+  });
+
+  dgSocket.on('close', (code, reason) => {
+    log('info', 'Deepgram WebSocket connection closed', { code, reason: reason?.toString() });
+    dgSocket = null;
+
+    // If still recording, attempt reconnection
+    if (isRecording) {
+      log('info', 'Reconnecting Deepgram WebSocket in 1s...');
+      if (recordingProcess) {
+        try { recordingProcess.kill('SIGKILL'); } catch (_) { }
+        recordingProcess = null;
+      }
+      setTimeout(() => {
+        if (isRecording) startDeepgramStreaming();
+      }, 1000);
+    }
+  });
+}
+
+function spawnSoxStreaming() {
+  const isWindows = process.platform === 'win32';
+  const cmd = 'sox';
+  let args;
+
+  if (isWindows) {
+    // Capture from Windows default audio device, output raw PCM to stdout
+    args = [
+      '-t', 'waveaudio', 'default', '-q',
+      '-b', '16', '-e', 'signed', '-c', '1', '-r', '16000',
+      '-t', 'raw', '-'
+    ];
+  } else {
+    // macOS / Linux
+    args = [
+      '-d', '-q',
+      '-b', '16', '-e', 'signed', '-c', '1', '-r', '16000',
+      '-t', 'raw', '-'
+    ];
+  }
+
+  recordingProcess = spawn(cmd, args);
+
+  recordingProcess.stdout.on('data', (chunk) => {
+    // Pipe raw PCM audio directly into the Deepgram WebSocket
+    if (dgSocket && dgSocket.readyState === WebSocket.OPEN) {
+      try {
+        dgSocket.send(chunk);
+      } catch (err) {
+        log('debug', 'Failed to send audio chunk to Deepgram', { error: err.message });
+      }
+    }
+  });
+
+  recordingProcess.stderr.on('data', (data) => {
+    const msg = data.toString().trim();
+    if (msg.length > 0) {
+      log('debug', 'Sox stderr', { message: msg });
+    }
+  });
+
+  recordingProcess.on('error', (error) => {
+    log('error', 'Failed to spawn sox for streaming', { error: error.message });
+    if (isRecording) {
+      process.send({ type: 'error', error: `Microphone capture failed (sox error): ${error.message}` });
+      stopRecording();
+    }
+  });
+
+  recordingProcess.on('close', (code) => {
+    recordingProcess = null;
+    log('debug', 'Sox streaming process closed', { code });
+  });
+
+  log('info', 'Sox streaming process spawned (raw PCM → Deepgram WebSocket)');
+}
+
+// ===========================================================================
+//  GROQ WHISPER FALLBACK MODE (existing batch logic)
+// ===========================================================================
+
+async function runGroqRecordingLoop() {
   if (!isRecording) return;
 
   const tempWavPath = path.join(__dirname, 'temp_audio.wav');
@@ -59,8 +248,6 @@ async function runRecordingLoop() {
   const cmd = 'sox';
   let args = [];
 
-  // sox format arguments: raw PCM, 16kHz, 16-bit, mono
-  // we wait for 0.1s of sound > 1%, then stop after 0.9s of silence < 1%
   const formatArgs = ['-b', '16', '-e', 'signed', '-c', '1', '-r', '16000', tempWavPath, 'silence', '1', '0.1', '1%', '1', '0.99', '1%'];
 
   if (isWindows) {
@@ -88,11 +275,10 @@ async function runRecordingLoop() {
       log('warn', `sox exited with code ${code}`);
     }
 
-    // Process the file
     try {
       if (fs.existsSync(tempWavPath)) {
         const stats = fs.statSync(tempWavPath);
-        if (stats.size > 2000) { // Check if it's not basically empty (WAV headers are ~44 bytes)
+        if (stats.size > 2000) {
           log('debug', 'Uploading audio to Groq Whisper...', { size: stats.size, keyCount: groqClients.length });
 
           process.send({ type: 'interim-transcription', text: 'Transcribing...' });
@@ -152,14 +338,18 @@ async function runRecordingLoop() {
 
     // Loop!
     if (isRecording) {
-      setTimeout(() => runRecordingLoop(), 10);
+      setTimeout(() => runGroqRecordingLoop(), 10);
     }
   });
 }
 
+// ===========================================================================
+//  Public recording controls
+// ===========================================================================
+
 function startRecording() {
   if (!available) {
-    process.send({ type: 'error', error: 'Groq API not initialized' });
+    process.send({ type: 'error', error: 'Speech service not initialized' });
     return;
   }
   if (isRecording) {
@@ -168,12 +358,22 @@ function startRecording() {
   }
   isRecording = true;
   sessionStartTime = Date.now();
-  retryCount = 0;
   process.send({ type: 'recording-started' });
-  process.send({ type: 'session-started', sessionId: 'groq-' + Date.now() });
+  process.send({ type: 'session-started', sessionId: (useDeepgram ? 'dg-' : 'groq-') + Date.now() });
 
   cleanup();
-  runRecordingLoop();
+
+  if (useDeepgram) {
+    try {
+      startDeepgramStreaming();
+    } catch (err) {
+      log('error', 'Failed to start Deepgram streaming', { error: err.message });
+      process.send({ type: 'error', error: `Deepgram streaming failed: ${err.message}` });
+      stopRecording();
+    }
+  } else {
+    runGroqRecordingLoop();
+  }
 }
 
 function stopRecording() {
@@ -182,10 +382,10 @@ function stopRecording() {
   cleanup();
 
   const dur = sessionStartTime ? Date.now() - sessionStartTime : 0;
-  log('info', 'Stopping speech recognition', { sessionDuration: `${dur}ms` });
+  log('info', 'Stopping speech recognition', { sessionDuration: `${dur}ms`, mode: useDeepgram ? 'deepgram' : 'groq' });
 
   process.send({ type: 'recording-stopped' });
-  process.send({ type: 'session-stopped', sessionId: 'groq-' + Date.now() });
+  process.send({ type: 'session-stopped', sessionId: (useDeepgram ? 'dg-' : 'groq-') + Date.now() });
 }
 
 function getStatus() {
@@ -193,19 +393,22 @@ function getStatus() {
     isRecording,
     isInitialized: available,
     available,
+    mode: useDeepgram ? 'deepgram' : 'groq',
     sessionDuration: sessionStartTime ? Date.now() - sessionStartTime : 0,
-    retryCount
   };
 }
 
 function testConnection() {
   if (!available) {
-    process.send({ type: 'test-result', success: false, message: 'Groq not initialized' });
+    process.send({ type: 'test-result', success: false, message: 'Speech service not initialized' });
     return;
   }
-  process.send({ type: 'test-result', success: true, message: 'Connection test successful' });
+  process.send({ type: 'test-result', success: true, message: `Connection test successful (${useDeepgram ? 'Deepgram' : 'Groq'})` });
 }
 
+// ---------------------------------------------------------------------------
+// IPC message handler
+// ---------------------------------------------------------------------------
 process.on('message', (msg) => {
   try {
     switch (msg.type) {
@@ -237,4 +440,4 @@ process.on('uncaughtException', (error) => {
 process.on('unhandledRejection', (reason) => {
   log('error', 'Unhandled rejection in speech worker', { error: String(reason) });
 });
-log('info', 'Speech worker process started (Groq Whisper)', { pid: process.pid });
+log('info', 'Speech worker process started (Deepgram/Groq hybrid)', { pid: process.pid });

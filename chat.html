@@ -274,7 +274,7 @@
           <div class="shortcut-row"><span class="shortcut-label">Cycle Skill Down (DSA → Programming → General)</span><span class="shortcut-key">Ctrl+Down</span></div>
           <div class="shortcut-row"><span class="shortcut-label">Cycle Response Mode</span><span class="shortcut-key">Ctrl+Shift+X</span></div>
           <div class="shortcut-row"><span class="shortcut-label">Toggle Recording</span><span class="shortcut-key">Alt+R</span></div>
-          <div class="shortcut-row"><span class="shortcut-label">Toggle Stealth Mode</span><span class="shortcut-key">Alt+A</span></div>
+          <div class="shortcut-row"><span class="shortcut-label">Toggle Click-Through</span><span class="shortcut-key">Ctrl+Space</span></div>
           <div class="shortcut-row"><span class="shortcut-label">Show/Hide Window</span><span class="shortcut-key">Ctrl+Shift+V</span></div>
           <div class="shortcut-row"><span class="shortcut-label">Open Chat</span><span class="shortcut-key">Ctrl+Shift+C</span></div>
           <div class="shortcut-row"><span class="shortcut-label">Clear Session</span><span class="shortcut-key">Ctrl+Shift+\</span></div>
@@ -992,7 +992,7 @@
       if (micButton) {
         micButton.addEventListener('click', async () => {
           if (!isInteractive) {
-            addMessage('Window is in non-interactive mode. Press Alt+A to enable interaction.', 'error');
+            addMessage('Click-through is on. Press Ctrl+Space to interact with the overlay.', 'error');
             return;
           }
           if (!speechAvailable) {

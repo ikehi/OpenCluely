@@ -179,6 +179,7 @@ class ApplicationController {
       "CommandOrControl+Shift+S": () => this.triggerScreenshotOCR(),
       "CommandOrControl+Shift+V": () => windowManager.toggleVisibility(),
       "CommandOrControl+Shift+I": () => windowManager.toggleInteraction(),
+      "CommandOrControl+Space": () => windowManager.toggleInteraction(),
       "CommandOrControl+Shift+C": () => windowManager.switchToWindow("chat"),
       "CommandOrControl+Shift+\\": () => this.clearSessionMemory(),
       "CommandOrControl+,": () => windowManager.showSettings(),
@@ -232,22 +233,24 @@ class ApplicationController {
         window.webContents.send("transcription-received", { text });
       });
       
-      // Accumulate text for LLM processing to avoid rate limits
+      // Accumulate text — do NOT send to LLM yet.
+      // The LLM is triggered by the 'utterance-end' event (Deepgram detects
+      // 3 seconds of real audio silence), not by a dumb debounce timer.
       if (!this.accumulatedTranscription) {
         this.accumulatedTranscription = "";
       }
       this.accumulatedTranscription += " " + text;
 
-      if (this.transcriptionDebounceTimeout) {
-        clearTimeout(this.transcriptionDebounceTimeout);
+      // Safety fallback: if Deepgram never fires UtteranceEnd (e.g. Groq
+      // fallback mode), use a 5-second debounce as a catch-all.
+      if (this.transcriptionFallbackTimeout) {
+        clearTimeout(this.transcriptionFallbackTimeout);
       }
-
-      // Process transcription with LLM only after 600ms of silence
-      this.transcriptionDebounceTimeout = setTimeout(async () => {
-        const fullText = this.accumulatedTranscription.trim();
-        this.accumulatedTranscription = ""; // reset for next batch
-        
-        if (fullText.length > 0) {
+      this.transcriptionFallbackTimeout = setTimeout(async () => {
+        if (this.accumulatedTranscription && this.accumulatedTranscription.trim().length > 0) {
+          logger.info("Fallback timer fired — sending accumulated transcription to LLM");
+          const fullText = this.accumulatedTranscription.trim();
+          this.accumulatedTranscription = "";
           try {
             const sessionHistory = sessionManager.getOptimizedHistory();
             await this.processTranscriptionWithLLM(fullText, sessionHistory);
@@ -258,7 +261,37 @@ class ApplicationController {
             });
           }
         }
-      }, 600);
+      }, 5000);
+    });
+
+    // Deepgram UtteranceEnd — the speaker has been silent for 3 seconds.
+    // This is the signal that they finished their question. Send the
+    // entire accumulated transcript to the LLM as one complete question.
+    speechService.on("utterance-end", async () => {
+      // Cancel the fallback timer since UtteranceEnd fired properly
+      if (this.transcriptionFallbackTimeout) {
+        clearTimeout(this.transcriptionFallbackTimeout);
+        this.transcriptionFallbackTimeout = null;
+      }
+
+      const fullText = (this.accumulatedTranscription || "").trim();
+      this.accumulatedTranscription = "";
+
+      if (fullText.length > 0) {
+        logger.info("UtteranceEnd — sending complete question to LLM", {
+          textLength: fullText.length,
+          textPreview: fullText.substring(0, 100)
+        });
+        try {
+          const sessionHistory = sessionManager.getOptimizedHistory();
+          await this.processTranscriptionWithLLM(fullText, sessionHistory);
+        } catch (error) {
+          logger.error("Failed to process transcription with LLM", {
+            error: error.message,
+            text: fullText.substring(0, 100)
+          });
+        }
+      }
     });
 
     speechService.on("interim-transcription", (text) => {
@@ -880,10 +913,10 @@ class ApplicationController {
 
       const capture = await captureService.captureAndProcess();
 
-      // Restore windows
+      // Restore windows WITHOUT stealing focus from the user's browser/editor
       windowManager.windows.forEach(win => {
         if (!win.isDestroyed() && win._wasVisible) {
-          windowManager.showOnCurrentDesktop(win);
+          windowManager.showInactiveOnCurrentDesktop(win);
           win._wasVisible = false;
         }
       });
@@ -982,10 +1015,10 @@ class ApplicationController {
 
       const capture = await captureService.captureAndProcess();
 
-      // Restore windows
+      // Restore windows WITHOUT stealing focus from the user's browser/editor
       windowManager.windows.forEach(win => {
         if (!win.isDestroyed() && win._wasVisible) {
-          windowManager.showOnCurrentDesktop(win);
+          windowManager.showInactiveOnCurrentDesktop(win);
           win._wasVisible = false;
         }
       });
