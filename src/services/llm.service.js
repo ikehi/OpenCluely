@@ -2043,12 +2043,12 @@ ${humanizedPrompt}`;
       modelPool = [forceModel];
     } else if (isCodingSkill) {
       if (isVision) {
-        // qwen3.6-27b natively supports vision on Groq, making it perfect for coding screenshots
-        modelPool = ['qwen/qwen3.6-27b'];
+        // qwen3.8-27b natively supports vision on Groq, making it perfect for coding screenshots
+        modelPool = ['qwen/qwen3.8-27b'];
       } else {
         modelPool = [
           'openai/gpt-oss-120b',
-          'qwen/qwen3.6-27b',
+          'qwen/qwen3.8-27b',
           'openai/gpt-oss-20b'
         ];
       }
@@ -2072,10 +2072,11 @@ ${humanizedPrompt}`;
           maxTokens = 450;
         }
       } else {
+        // General interview Q&A: qwen3.8-27b first — deeper technical recall than gpt-oss-20b
         // MCQ: prefer Qwen first — GPT OSS can burn tokens on hidden reasoning and return empty
         modelPool = mcqAnswerOnly
-          ? ['qwen/qwen3.6-27b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b']
-          : ['openai/gpt-oss-20b', 'qwen/qwen3.6-27b'];
+          ? ['qwen/qwen3.8-27b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b']
+          : ['qwen/qwen3.8-27b', 'openai/gpt-oss-20b'];
         if (preferCodingTokenBudget) {
           if (mode === 'complex') maxTokens = 6000;
           else if (mode === 'medium') maxTokens = 4000;
