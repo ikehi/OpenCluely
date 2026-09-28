@@ -104,11 +104,8 @@ class ApplicationController {
       await windowManager.initializeWindows();
       this.setupGlobalShortcuts();
       
-      // Auto-start speech recognition and show chat window
+      // Auto-start speech recognition in the background; UI stays hidden until user triggers it
       speechService.startRecording();
-      if (typeof windowManager.showChatWindow === 'function') {
-        windowManager.showChatWindow();
-      }
 
       // Initialize default stealth mode with terminal icon
       this.updateAppIcon("terminal");
