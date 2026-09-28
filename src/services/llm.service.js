@@ -2047,8 +2047,8 @@ ${humanizedPrompt}`;
         modelPool = ['qwen/qwen3.8-27b'];
       } else {
         modelPool = [
-          'openai/gpt-oss-120b',
           'qwen/qwen3.8-27b',
+          'openai/gpt-oss-120b',
           'openai/gpt-oss-20b'
         ];
       }
