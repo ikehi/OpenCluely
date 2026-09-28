@@ -8,7 +8,7 @@ class WindowManager {
     this.windows = new Map();
     this.activeWindow = 'main';
     // Default click-through: overlays stay visible but clicks pass through to apps below
-    this.isInteractive = false;
+    this.isInteractive = true; // windows are clickable by default when shown
     this.isVisible = false;
     this.currentDisplay = null;
     this.screenWatcher = null;
@@ -98,8 +98,8 @@ class WindowManager {
       this.setupScreenTracking();
       this.setupScreenSharingDetection();
 
-      // Start click-through so overlays can sit over editors without blocking them
-      this.setInteractive(false);
+      // Start interactive so windows are clickable when they appear
+      this.setInteractive(true);
       
       this.isInitialized = true;
       this.isInitializing = false;
