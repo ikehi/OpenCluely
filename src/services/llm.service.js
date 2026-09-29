@@ -10,7 +10,7 @@ class LLMService {
     this.isInitialized = false;
     this.requestCount = 0;
     this.errorCount = 0;
-    this.visionModel = 'qwen/qwen3.6-27b';
+    this.visionModel = 'qwen/qwen3.8-27b';
 
     this.initializeClient();
   }
@@ -1241,7 +1241,7 @@ ${extractedText}`;
     let bestResponse = null;
     let bestScore = 0;
 
-    const modelSequence = ['openai/gpt-oss-120b', 'qwen/qwen3.6-27b'];
+    const modelSequence = ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b'];
 
     for (let pass = 0; pass < messageSets.length; pass++) {
       const model = modelSequence[Math.min(pass, modelSequence.length - 1)];
@@ -2113,11 +2113,6 @@ ${humanizedPrompt}`;
       max_tokens: maxTokens
     };
 
-    // Qwen 3.6 defaults to thinking mode — burns max_tokens before any answer (vision/MCQ fail with finish_reason=length)
-    if (payload.model && payload.model.includes('qwen/qwen3.6-27b') && !(requestOptions && requestOptions.allowQwenThinking)) {
-      payload.reasoning_effort = 'none';
-    }
-
     let lastError = null;
 
     // Round-robin across all 7 keys — never pin to key 0 (that caused rate limits)
@@ -2129,6 +2124,13 @@ ${humanizedPrompt}`;
     // Try each model instantly on rate limit — zero delay rotation
     for (let i = 0; i < modelPool.length; i++) {
       payload.model = modelPool[i];
+
+      // Qwen defaults to thinking mode — burns max_tokens before any answer (vision/MCQ fail with finish_reason=length)
+      if (payload.model && payload.model.includes('qwen') && !(requestOptions && requestOptions.allowQwenThinking)) {
+        payload.reasoning_effort = 'none';
+      } else {
+        delete payload.reasoning_effort;
+      }
 
       // Try each API key for the current model
       for (let j = 0; j < this.clients.length; j++) {

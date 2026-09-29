@@ -15,7 +15,7 @@ async function probeKey(apiKey, index) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'qwen/qwen3.6-27b',
+      model: 'qwen/qwen3.8-27b',
       messages: [{ role: 'user', content: 'Reply with exactly: OK' }],
       max_tokens: 8,
       reasoning_effort: 'none'
@@ -39,7 +39,7 @@ async function probeKey(apiKey, index) {
 }
 
 async function main() {
-  console.log(`Checking ${keys.length} Groq API keys (Qwen 3.6, reasoning off)...\n`);
+  console.log(`Checking ${keys.length} Groq API keys (Qwen 3.8, reasoning off)...\n`);
   const orgs = new Map();
 
   for (let i = 0; i < keys.length; i++) {
