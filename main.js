@@ -897,29 +897,8 @@ class ApplicationController {
   }
 
   async executeScreenshotOCR(responseId) {
-    const startTime = Date.now();
-
     try {
-      // Temporarily hide all windows so native dropdowns and the app are not in the screenshot
-      windowManager.windows.forEach(win => {
-        if (!win.isDestroyed() && win.isVisible()) {
-          win.hide();
-          win._wasVisible = true;
-        }
-      });
-
-      // Small delay for OS to process hides and destroy floating native dropdowns
-      await new Promise(resolve => setTimeout(resolve, 400));
-
       const capture = await captureService.captureAndProcess();
-
-      // Restore windows WITHOUT stealing focus from the user's browser/editor
-      windowManager.windows.forEach(win => {
-        if (!win.isDestroyed() && win._wasVisible) {
-          windowManager.showInactiveOnCurrentDesktop(win);
-          win._wasVisible = false;
-        }
-      });
 
       windowManager.showLLMLoading();
 
@@ -999,29 +978,8 @@ class ApplicationController {
       return;
     }
 
-    const startTime = Date.now();
-
     try {
-      // Temporarily hide all windows
-      windowManager.windows.forEach(win => {
-        if (!win.isDestroyed() && win.isVisible()) {
-          win.hide();
-          win._wasVisible = true;
-        }
-      });
-
-      // Small delay for OS
-      await new Promise(resolve => setTimeout(resolve, 400));
-
       const capture = await captureService.captureAndProcess();
-
-      // Restore windows WITHOUT stealing focus from the user's browser/editor
-      windowManager.windows.forEach(win => {
-        if (!win.isDestroyed() && win._wasVisible) {
-          windowManager.showInactiveOnCurrentDesktop(win);
-          win._wasVisible = false;
-        }
-      });
 
       if (!capture || !capture.imageBuffer || !capture.imageBuffer.length) {
         this.broadcastOCRError("Failed to capture screenshot for batch");
