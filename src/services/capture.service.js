@@ -44,10 +44,29 @@ class CaptureService {
         }
       }
 
-      const buffer = finalImage.toJPEG(80);
+      // Downscale screenshot if dimensions exceed max bounds (reduces Groq Vision tile & TPM token consumption by ~60%)
+      const originalSize = finalImage.getSize();
+      const maxDimension = 1000;
+      if (originalSize.width > maxDimension || originalSize.height > maxDimension) {
+        const scale = Math.min(maxDimension / originalSize.width, maxDimension / originalSize.height);
+        const targetWidth = Math.round(originalSize.width * scale);
+        const targetHeight = Math.round(originalSize.height * scale);
+        try {
+          finalImage = finalImage.resize({
+            width: targetWidth,
+            height: targetHeight,
+            quality: 'good'
+          });
+        } catch (resizeErr) {
+          logger.warn('Image downscaling failed, using original', { error: resizeErr.message });
+        }
+      }
+
+      const buffer = finalImage.toJPEG(70);
       logger.logPerformance('Screenshot capture', startTime, {
         bytes: buffer.length,
-        dimensions: finalImage.getSize()
+        dimensions: finalImage.getSize(),
+        originalDimensions: originalSize
       });
 
       return {

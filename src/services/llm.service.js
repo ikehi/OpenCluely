@@ -27,20 +27,63 @@ class LLMService {
     }
 
     try {
-      this.clients = apiKeys.map(apiKey => new Groq({ apiKey }));
+      this.clients = apiKeys.map((apiKey, index) => ({
+        client: new Groq({ apiKey }),
+        apiKey,
+        index,
+        isBlocked: false,
+        blockedReason: null
+      }));
       this.currentClientIndex = 0;
       this.isInitialized = true;
 
       logger.info('Groq AI clients initialized successfully', {
         keyCount: apiKeys.length,
         model: config.get('llm.groq.model'),
-        keyRotation: 'round-robin across all keys on failure'
+        keyRotation: 'round-robin across active keys'
       });
+
+      // Background probe: validate keys against Groq to auto-disable 403 / blocked keys upfront
+      this.validateGroqKeys();
     } catch (error) {
       logger.error('Failed to initialize Groq clients', {
         error: error.message
       });
     }
+  }
+
+  async validateGroqKeys() {
+    if (!this.clients || this.clients.length === 0) return;
+
+    logger.info(`Validating ${this.clients.length} Groq API keys in background...`);
+
+    const checks = this.clients.map(async (entry) => {
+      try {
+        await entry.client.chat.completions.create({
+          model: this.visionModel,
+          messages: [{ role: 'user', content: 'ping' }],
+          max_tokens: 1,
+          reasoning_effort: 'none'
+        });
+      } catch (err) {
+        const msg = (err.message || '').toLowerCase();
+        if (err.status === 403 || err.status === 401 || msg.includes('blocked at the project level') || msg.includes('permission')) {
+          entry.isBlocked = true;
+          entry.blockedReason = err.message;
+          logger.warn(`Groq API key at index ${entry.index} is blocked on ${this.visionModel} and auto-disabled: ${err.message}`);
+        }
+      }
+    });
+
+    await Promise.allSettled(checks);
+    const activeCount = this.getActiveClients().length;
+    logger.info(`Groq API key validation complete: ${activeCount}/${this.clients.length} active keys`);
+  }
+
+  getActiveClients() {
+    if (!this.clients || this.clients.length === 0) return [];
+    const active = this.clients.filter(c => !c.isBlocked);
+    return active.length > 0 ? active : this.clients;
   }
 
   getGenerationConfig(overrides = {}) {
@@ -127,6 +170,7 @@ class LLMService {
         // Use a small temp override for extraction tokens to ensure we don't blow the limit
         sessionManager.setResponseMode('medium'); // forces vision output budget to ~1500 max
         
+        const stage1StartTime = Date.now();
         let extractedText = '';
         try {
           extractedText = await this.executeRequest(extractionMessages, true, activeSkill, {
@@ -137,6 +181,11 @@ class LLMService {
         } finally {
           sessionManager.setResponseMode(originalMode);
         }
+        logger.logPerformance('Pipeline Stage 1 (Vision Extraction)', stage1StartTime, {
+          activeSkill,
+          imageCount: 1,
+          extractedLength: extractedText.length
+        });
 
         const rawExtractedText = extractedText;
 
@@ -356,6 +405,7 @@ class LLMService {
         
         sessionManager.setResponseMode('medium');
         
+        const stage1StartTime = Date.now();
         let extractedText = '';
         try {
           extractedText = await this.executeRequest(extractionMessages, true, activeSkill, {
@@ -366,6 +416,11 @@ class LLMService {
         } finally {
           sessionManager.setResponseMode(originalMode);
         }
+        logger.logPerformance('Pipeline Stage 1 (Vision Extraction)', stage1StartTime, {
+          activeSkill,
+          imageCount: images.length,
+          extractedLength: extractedText.length
+        });
 
         const rawExtractedText = extractedText;
 
@@ -2115,10 +2170,10 @@ ${humanizedPrompt}`;
 
     let lastError = null;
 
-    // Round-robin across all 7 keys — never pin to key 0 (that caused rate limits)
+    const activeClients = this.getActiveClients();
     const requestStartingKeyIndex = this.currentClientIndex;
-    if (this.clients.length > 0) {
-      this.currentClientIndex = (this.currentClientIndex + 1) % this.clients.length;
+    if (activeClients.length > 0) {
+      this.currentClientIndex = (this.currentClientIndex + 1) % activeClients.length;
     }
 
     // Try each model instantly on rate limit — zero delay rotation
@@ -2133,9 +2188,10 @@ ${humanizedPrompt}`;
       }
 
       // Try each API key for the current model
-      for (let j = 0; j < this.clients.length; j++) {
-        const clientIndex = (requestStartingKeyIndex + j) % this.clients.length;
-        const currentClient = this.clients[clientIndex];
+      for (let j = 0; j < activeClients.length; j++) {
+        const clientIndex = (requestStartingKeyIndex + j) % activeClients.length;
+        const clientEntry = activeClients[clientIndex];
+        const currentClient = clientEntry.client;
 
         try {
           const response = await currentClient.chat.completions.create(payload);
@@ -2157,15 +2213,22 @@ ${humanizedPrompt}`;
           lastError = error;
           const errorInfo = this.analyzeError(error);
 
-          logger.warn(`Groq model ${payload.model} failed on API key index ${clientIndex}`, {
+          // Auto-disable bad/blocked keys so future requests skip them immediately
+          if (error.status === 403 || error.status === 401 || (errorInfo.type === 'AUTH_ERROR')) {
+            clientEntry.isBlocked = true;
+            clientEntry.blockedReason = error.message;
+            logger.warn(`Groq API key index ${clientEntry.index} auto-disabled due to ${error.status || errorInfo.type}: ${error.message}`);
+          }
+
+          logger.warn(`Groq model ${payload.model} failed on API key index ${clientEntry.index}`, {
             error: error.message,
             errorType: errorInfo.type,
             model: payload.model,
-            keyIndex: clientIndex,
-            totalKeys: this.clients.length
+            keyIndex: clientEntry.index,
+            activeKeys: activeClients.length
           });
 
-          if (this.shouldTryNextApiKey(errorInfo) && j < this.clients.length - 1) {
+          if (this.shouldTryNextApiKey(errorInfo) && j < activeClients.length - 1) {
             continue;
           }
 
@@ -2177,12 +2240,12 @@ ${humanizedPrompt}`;
         const errorInfo = this.analyzeError(lastError);
 
         if (this.shouldTryNextApiKey(errorInfo) && i < modelPool.length - 1) {
-          logger.info(`All ${this.clients.length} API keys exhausted for ${payload.model} (${errorInfo.type}), switching to ${modelPool[i + 1]}`);
+          logger.info(`All ${activeClients.length} API keys exhausted for ${payload.model} (${errorInfo.type}), switching to ${modelPool[i + 1]}`);
           continue;
         }
 
         if (i === modelPool.length - 1) {
-          throw new Error(`All Groq models and ${this.clients.length} API keys exhausted: ${lastError.message}`);
+          throw new Error(`All Groq models and ${activeClients.length} API keys exhausted: ${lastError.message}`);
         }
 
         if (errorInfo.type !== 'RATE_LIMIT_ERROR') {
@@ -2192,7 +2255,7 @@ ${humanizedPrompt}`;
       }
     }
 
-    throw new Error(`All Groq models and ${this.clients.length} API keys exhausted. Last error: ${lastError ? lastError.message : 'Unknown'}`);
+    throw new Error(`All Groq models and ${activeClients.length} API keys exhausted. Last error: ${lastError ? lastError.message : 'Unknown'}`);
   }
 
   // 413 fallback — if ALL preferred coding models rejected the request because it was too
